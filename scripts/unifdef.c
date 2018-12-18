@@ -305,6 +305,7 @@ main(int argc, char *argv[])
 			break;
 		case 'V': /* print version */
 			version();
+			/* FALLTHROUGH */
 		default:
 			usage();
 		}

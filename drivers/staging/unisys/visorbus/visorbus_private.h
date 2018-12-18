@@ -34,7 +34,7 @@ struct visorchipset_busdev_notifiers {
 	void (*device_destroy)(struct visor_device *bus_info);
 	void (*device_pause)(struct visor_device *bus_info);
 	void (*device_resume)(struct visor_device *bus_info);
-};
+} __no_const;
 
 /*  These functions live inside visorchipset, and will be called to indicate
  *  responses to specific events (by code outside of visorchipset).
@@ -49,7 +49,7 @@ struct visorchipset_busdev_responders {
 	void (*device_destroy)(struct visor_device *p, int response);
 	void (*device_pause)(struct visor_device *p, int response);
 	void (*device_resume)(struct visor_device *p, int response);
-};
+} __no_const;
 
 /** Register functions (in the bus driver) to get called by visorchipset
  *  whenever a bus or device appears for which this guest is to be the

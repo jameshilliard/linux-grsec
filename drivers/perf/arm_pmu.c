@@ -851,17 +851,14 @@ static int of_pmu_irq_cfg(struct arm_pmu *pmu)
 
 		/* For SPIs, we need to track the affinity per IRQ */
 		if (using_spi) {
-			if (i >= pdev->num_resources) {
-				of_node_put(dn);
+			if (i >= pdev->num_resources)
 				break;
-			}
 
 			irqs[i] = cpu;
 		}
 
 		/* Keep track of the CPUs containing this PMU type */
 		cpumask_set_cpu(cpu, &pmu->supported_cpus);
-		of_node_put(dn);
 		i++;
 	} while (1);
 
@@ -894,9 +891,6 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 		return -ENOMEM;
 	}
 
-	if (!__oprofile_cpu_pmu)
-		__oprofile_cpu_pmu = pmu;
-
 	pmu->plat_device = pdev;
 
 	if (node && (of_id = of_match_node(of_table, pdev->dev.of_node))) {
@@ -922,6 +916,9 @@ int arm_pmu_device_probe(struct platform_device *pdev,
 	ret = armpmu_register(pmu, -1);
 	if (ret)
 		goto out_destroy;
+
+	if (!__oprofile_cpu_pmu)
+		__oprofile_cpu_pmu = pmu;
 
 	return 0;
 

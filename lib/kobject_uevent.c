@@ -130,7 +130,7 @@ static int init_uevent_argv(struct kobj_uevent_env *env, const char *subsystem)
 {
 	int len;
 
-	len = strlcpy(&env->buf[env->buflen], subsystem,
+	len = strlcpy_check(&env->buf[env->buflen], subsystem,
 		      sizeof(env->buf) - env->buflen);
 	if (len >= (sizeof(env->buf) - env->buflen)) {
 		WARN(1, KERN_ERR "init_uevent_argv: buffer size too small\n");

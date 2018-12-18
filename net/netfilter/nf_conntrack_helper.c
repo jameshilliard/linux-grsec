@@ -57,7 +57,7 @@ static struct ctl_table helper_sysctl_table[] = {
 
 static int nf_conntrack_helper_init_sysctl(struct net *net)
 {
-	struct ctl_table *table;
+	ctl_table_no_const *table;
 
 	table = kmemdup(helper_sysctl_table, sizeof(helper_sysctl_table),
 			GFP_KERNEL);
@@ -425,7 +425,7 @@ static void __nf_conntrack_helper_unregister(struct nf_conntrack_helper *me,
 	}
 	local_bh_disable();
 	for (i = 0; i < net->ct.htable_size; i++) {
-		spin_lock(&nf_conntrack_locks[i % CONNTRACK_LOCKS]);
+		nf_conntrack_lock(&nf_conntrack_locks[i % CONNTRACK_LOCKS]);
 		if (i < net->ct.htable_size) {
 			hlist_nulls_for_each_entry(h, nn, &net->ct.hash[i], hnnode)
 				unhelp(h, me);

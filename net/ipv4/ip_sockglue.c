@@ -467,16 +467,15 @@ static bool ipv4_datagram_support_cmsg(const struct sock *sk,
 		return false;
 
 	/* Support IP_PKTINFO on tstamp packets if requested, to correlate
-	 * timestamp with egress dev. Not possible for packets without dev
+	 * timestamp with egress dev. Not possible for packets without iif
 	 * or without payload (SOF_TIMESTAMPING_OPT_TSONLY).
 	 */
-	if ((!(sk->sk_tsflags & SOF_TIMESTAMPING_OPT_CMSG)) ||
-	    (!skb->dev))
+	info = PKTINFO_SKB_CB(skb);
+	if (!(sk->sk_tsflags & SOF_TIMESTAMPING_OPT_CMSG) ||
+	    !info->ipi_ifindex)
 		return false;
 
-	info = PKTINFO_SKB_CB(skb);
 	info->ipi_spec_dst.s_addr = ip_hdr(skb)->saddr;
-	info->ipi_ifindex = skb->dev->ifindex;
 	return true;
 }
 
@@ -1193,7 +1192,12 @@ void ipv4_pktinfo_prepare(const struct sock *sk, struct sk_buff *skb)
 		       ipv6_sk_rxinfo(sk);
 
 	if (prepare && skb_rtable(skb)) {
-		pktinfo->ipi_ifindex = inet_iif(skb);
+		/* skb->cb is overloaded: prior to this point it is IP{6}CB
+		 * which has interface index (iif) as the first member of the
+		 * underlying inet{6}_skb_parm struct. This code then overlays
+		 * PKTINFO_SKB_CB and in_pktinfo also has iif as the first
+		 * element so the iif is picked up from the prior IPCB
+		 */
 		pktinfo->ipi_spec_dst.s_addr = fib_compute_spec_dst(skb);
 	} else {
 		pktinfo->ipi_ifindex = 0;
@@ -1320,7 +1324,8 @@ static int do_ip_getsockopt(struct sock *sk, int level, int optname,
 		len = min_t(unsigned int, len, opt->optlen);
 		if (put_user(len, optlen))
 			return -EFAULT;
-		if (copy_to_user(optval, opt->__data, len))
+		if ((len > (sizeof(optbuf) - sizeof(struct ip_options))) ||
+		    copy_to_user(optval, opt->__data, len))
 			return -EFAULT;
 		return 0;
 	}
@@ -1453,7 +1458,7 @@ static int do_ip_getsockopt(struct sock *sk, int level, int optname,
 		if (sk->sk_type != SOCK_STREAM)
 			return -ENOPROTOOPT;
 
-		msg.msg_control = (__force void *) optval;
+		msg.msg_control = (__force_kernel void *) optval;
 		msg.msg_controllen = len;
 		msg.msg_flags = flags;
 

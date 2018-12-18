@@ -261,6 +261,7 @@ __visible void smp_reschedule_interrupt(struct pt_regs *regs)
 {
 	ack_APIC_irq();
 	__smp_reschedule_interrupt();
+	kvm_set_cpu_l1tf_flush_l1d();
 	/*
 	 * KVM uses this interrupt to force a cpu out of guest mode
 	 */
@@ -336,7 +337,7 @@ static int __init nonmi_ipi_setup(char *str)
 
 __setup("nonmi_ipi", nonmi_ipi_setup);
 
-struct smp_ops smp_ops = {
+struct smp_ops smp_ops __read_only = {
 	.smp_prepare_boot_cpu	= native_smp_prepare_boot_cpu,
 	.smp_prepare_cpus	= native_smp_prepare_cpus,
 	.smp_cpus_done		= native_smp_cpus_done,

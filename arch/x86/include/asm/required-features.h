@@ -19,8 +19,14 @@
 
 #if defined(CONFIG_X86_PAE) || defined(CONFIG_X86_64)
 # define NEED_PAE	(1<<(X86_FEATURE_PAE & 31))
+# ifdef CONFIG_ARCH_NEEDS_NX
+#  define NEED_NX	(1<<(X86_FEATURE_NX & 31))
+# else
+#  define NEED_NX	0
+# endif
 #else
 # define NEED_PAE	0
+# define NEED_NX	0
 #endif
 
 #ifdef CONFIG_X86_CMPXCHG64
@@ -82,7 +88,7 @@
 			 NEED_XMM|NEED_XMM2)
 #define SSE_MASK	(NEED_XMM|NEED_XMM2)
 
-#define REQUIRED_MASK1	(NEED_LM|NEED_3DNOW)
+#define REQUIRED_MASK1	(NEED_LM|NEED_3DNOW|NEED_NX)
 
 #define REQUIRED_MASK2	0
 #define REQUIRED_MASK3	(NEED_NOPL)

@@ -1537,7 +1537,7 @@ static void __init pmu_check_apic(void)
 
 }
 
-static struct attribute_group x86_pmu_format_group = {
+static attribute_group_no_const x86_pmu_format_group = {
 	.name = "format",
 	.attrs = NULL,
 };
@@ -1636,7 +1636,7 @@ static struct attribute *events_attr[] = {
 	NULL,
 };
 
-static struct attribute_group x86_pmu_events_group = {
+static attribute_group_no_const x86_pmu_events_group = {
 	.name = "events",
 	.attrs = events_attr,
 };
@@ -2006,25 +2006,22 @@ static void refresh_pce(void *ignored)
 		load_mm_cr4(current->active_mm);
 }
 
-static void x86_pmu_event_mapped(struct perf_event *event)
+static void x86_pmu_event_mapped(struct perf_event *event, struct mm_struct *mm)
 {
 	if (!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED))
 		return;
 
-	if (atomic_inc_return(&current->mm->context.perf_rdpmc_allowed) == 1)
-		on_each_cpu_mask(mm_cpumask(current->mm), refresh_pce, NULL, 1);
+	if (atomic_inc_return(&mm->context.perf_rdpmc_allowed) == 1)
+		on_each_cpu_mask(mm_cpumask(mm), refresh_pce, NULL, 1);
 }
 
-static void x86_pmu_event_unmapped(struct perf_event *event)
+static void x86_pmu_event_unmapped(struct perf_event *event, struct mm_struct *mm)
 {
-	if (!current->mm)
-		return;
-
 	if (!(event->hw.flags & PERF_X86_EVENT_RDPMC_ALLOWED))
 		return;
 
-	if (atomic_dec_and_test(&current->mm->context.perf_rdpmc_allowed))
-		on_each_cpu_mask(mm_cpumask(current->mm), refresh_pce, NULL, 1);
+	if (atomic_dec_and_test(&mm->context.perf_rdpmc_allowed))
+		on_each_cpu_mask(mm_cpumask(mm), refresh_pce, NULL, 1);
 }
 
 static int x86_pmu_event_idx(struct perf_event *event)
@@ -2222,18 +2219,15 @@ valid_user_frame(const void __user *fp, unsigned long size)
 static unsigned long get_segment_base(unsigned int segment)
 {
 	struct desc_struct *desc;
-	int idx = segment >> 3;
+	unsigned int idx = segment >> 3;
 
 	if ((segment & SEGMENT_TI_MASK) == SEGMENT_LDT) {
 #ifdef CONFIG_MODIFY_LDT_SYSCALL
 		struct ldt_struct *ldt;
 
-		if (idx > LDT_ENTRIES)
-			return 0;
-
 		/* IRQs are off, so this synchronizes with smp_store_release */
 		ldt = lockless_dereference(current->active_mm->context.ldt);
-		if (!ldt || idx > ldt->size)
+		if (!ldt || idx >= ldt->size)
 			return 0;
 
 		desc = &ldt->entries[idx];
@@ -2241,10 +2235,10 @@ static unsigned long get_segment_base(unsigned int segment)
 		return 0;
 #endif
 	} else {
-		if (idx > GDT_ENTRIES)
+		if (idx >= GDT_ENTRIES)
 			return 0;
 
-		desc = raw_cpu_ptr(gdt_page.gdt) + idx;
+		desc = get_cpu_gdt_table(smp_processor_id()) + idx;
 	}
 
 	return get_desc_base(desc);
@@ -2334,7 +2328,7 @@ perf_callchain_user(struct perf_callchain_entry *entry, struct pt_regs *regs)
 			break;
 
 		perf_callchain_store(entry, frame.return_address);
-		fp = frame.next_frame;
+		fp = (const void __force_user *)frame.next_frame;
 	}
 }
 

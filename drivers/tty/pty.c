@@ -872,8 +872,10 @@ static void __init unix98_pty_init(void)
 		panic("Couldn't register Unix98 pts driver");
 
 	/* Now create the /dev/ptmx special device */
+	pax_open_kernel();
 	tty_default_fops(&ptmx_fops);
-	ptmx_fops.open = ptmx_open;
+	const_cast(ptmx_fops.open) = ptmx_open;
+	pax_close_kernel();
 
 	cdev_init(&ptmx_cdev, &ptmx_fops);
 	if (cdev_add(&ptmx_cdev, MKDEV(TTYAUX_MAJOR, 2), 1) ||

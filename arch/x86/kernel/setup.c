@@ -113,6 +113,7 @@
 #include <asm/prom.h>
 #include <asm/microcode.h>
 #include <asm/kaiser.h>
+#include <asm/boot.h>
 
 /*
  * max_low_pfn_mapped: highest direct mapped pfn under 4GB
@@ -177,7 +178,7 @@ struct cpuinfo_x86 new_cpu_data = {
 	.wp_works_ok = -1,
 };
 /* common cpu data for all cpus */
-struct cpuinfo_x86 boot_cpu_data __read_mostly = {
+struct cpuinfo_x86 boot_cpu_data __read_only = {
 	.wp_works_ok = -1,
 };
 EXPORT_SYMBOL(boot_cpu_data);
@@ -201,17 +202,19 @@ struct ist_info ist_info;
 #endif
 
 #else
-struct cpuinfo_x86 boot_cpu_data __read_mostly = {
+struct cpuinfo_x86 boot_cpu_data __read_only = {
 	.x86_phys_bits = MAX_PHYSMEM_BITS,
 };
 EXPORT_SYMBOL(boot_cpu_data);
 #endif
 
 
-#if !defined(CONFIG_X86_PAE) || defined(CONFIG_X86_64)
-__visible unsigned long mmu_cr4_features;
+#ifdef CONFIG_X86_64
+__visible unsigned long mmu_cr4_features __read_only = X86_CR4_PSE | X86_CR4_PAE | X86_CR4_PGE;
+#elif defined(CONFIG_X86_PAE)
+__visible unsigned long mmu_cr4_features __read_only = X86_CR4_PAE;
 #else
-__visible unsigned long mmu_cr4_features = X86_CR4_PAE;
+__visible unsigned long mmu_cr4_features __read_only;
 #endif
 
 /* Boot loader ID and version as integers, for the benefit of proc_dointvec */
@@ -759,7 +762,7 @@ static void __init trim_bios_range(void)
 	 * area (640->1Mb) as ram even though it is not.
 	 * take them out.
 	 */
-	e820_remove_range(BIOS_BEGIN, BIOS_END - BIOS_BEGIN, E820_RAM, 1);
+	e820_remove_range(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS, E820_RAM, 1);
 
 	sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &e820.nr_map);
 }
@@ -767,7 +770,7 @@ static void __init trim_bios_range(void)
 /* called before trim_bios_range() to spare extra sanitize */
 static void __init e820_add_kernel_range(void)
 {
-	u64 start = __pa_symbol(_text);
+	u64 start = __pa_symbol(ktla_ktva((unsigned long)_text));
 	u64 size = __pa_symbol(_end) - start;
 
 	/*
@@ -848,8 +851,8 @@ dump_kernel_offset(struct notifier_block *self, unsigned long v, void *p)
 
 void __init setup_arch(char **cmdline_p)
 {
-	memblock_reserve(__pa_symbol(_text),
-			 (unsigned long)__bss_stop - (unsigned long)_text);
+	memblock_reserve(__pa_symbol(ktla_ktva((unsigned long)_text)),
+			 (unsigned long)__bss_stop - ktla_ktva((unsigned long)_text));
 
 	/*
 	 * Make sure page 0 is always reserved because on systems with
@@ -948,16 +951,16 @@ void __init setup_arch(char **cmdline_p)
 
 	if (!boot_params.hdr.root_flags)
 		root_mountflags &= ~MS_RDONLY;
-	init_mm.start_code = (unsigned long) _text;
-	init_mm.end_code = (unsigned long) _etext;
-	init_mm.end_data = (unsigned long) _edata;
+	init_mm.start_code = ktla_ktva((unsigned long)_text);
+	init_mm.end_code = ktla_ktva((unsigned long)_etext);
+	init_mm.end_data = (unsigned long)_edata;
 	init_mm.brk = _brk_end;
 
 	mpx_mm_init(&init_mm);
 
-	code_resource.start = __pa_symbol(_text);
-	code_resource.end = __pa_symbol(_etext)-1;
-	data_resource.start = __pa_symbol(_etext);
+	code_resource.start = __pa_symbol(ktla_ktva((unsigned long)_text));
+	code_resource.end = __pa_symbol(ktla_ktva((unsigned long)_etext))-1;
+	data_resource.start = __pa_symbol(_sdata);
 	data_resource.end = __pa_symbol(_edata)-1;
 	bss_resource.start = __pa_symbol(__bss_start);
 	bss_resource.end = __pa_symbol(__bss_stop)-1;
@@ -1191,7 +1194,7 @@ void __init setup_arch(char **cmdline_p)
 
 	if (boot_cpu_data.cpuid_level >= 0) {
 		/* A CPU has %cr4 if and only if it has CPUID */
-		mmu_cr4_features = __read_cr4();
+		mmu_cr4_features = __read_cr4() & ~X86_CR4_PCIDE;
 		if (trampoline_cr4_features)
 			*trampoline_cr4_features = mmu_cr4_features;
 	}

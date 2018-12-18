@@ -551,7 +551,7 @@ static void accumulate_16bit_val(u32 *acc, u16 val)
 
 	if (wrapped)
 		newacc += 65536;
-	ACCESS_ONCE(*acc) = newacc;
+	ACCESS_ONCE_RW(*acc) = newacc;
 }
 
 static void populate_erx_stats(struct be_adapter *adapter,
@@ -5260,6 +5260,23 @@ static netdev_features_t be_features_check(struct sk_buff *skb,
 	struct be_adapter *adapter = netdev_priv(dev);
 	u8 l4_hdr = 0;
 
+	if (skb_is_gso(skb)) {
+		/* IPv6 TSO requests with extension hdrs are a problem
+		 * to Lancer and BE3 HW. Disable TSO6 feature.
+		 */
+		if (!skyhawk_chip(adapter) && is_ipv6_ext_hdr(skb))
+			features &= ~NETIF_F_TSO6;
+
+		/* Lancer cannot handle the packet with MSS less than 256.
+		 * Also it can't handle a TSO packet with a single segment
+		 * Disable the GSO support in such cases
+		 */
+		if (lancer_chip(adapter) &&
+		    (skb_shinfo(skb)->gso_size < 256 ||
+		     skb_shinfo(skb)->gso_segs == 1))
+			features &= ~NETIF_F_GSO_MASK;
+	}
+
 	/* The code below restricts offload features for some tunneled and
 	 * Q-in-Q packets.
 	 * Offload features for normal (non tunnel) packets are unchanged.
@@ -5943,7 +5960,7 @@ static void be_shutdown(struct pci_dev *pdev)
 }
 
 static pci_ers_result_t be_eeh_err_detected(struct pci_dev *pdev,
-					    pci_channel_state_t state)
+					    enum pci_channel_state state)
 {
 	struct be_adapter *adapter = pci_get_drvdata(pdev);
 

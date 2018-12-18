@@ -124,7 +124,7 @@ static int snd_rawmidi_runtime_create(struct snd_rawmidi_substream *substream)
 		runtime->avail = 0;
 	else
 		runtime->avail = runtime->buffer_size;
-	if ((runtime->buffer = kmalloc(runtime->buffer_size, GFP_KERNEL)) == NULL) {
+	if ((runtime->buffer = kzalloc(runtime->buffer_size, GFP_KERNEL)) == NULL) {
 		kfree(runtime);
 		return -ENOMEM;
 	}
@@ -648,7 +648,7 @@ int snd_rawmidi_output_params(struct snd_rawmidi_substream *substream,
 		return -EINVAL;
 	}
 	if (params->buffer_size != runtime->buffer_size) {
-		newbuf = kmalloc(params->buffer_size, GFP_KERNEL);
+		newbuf = kzalloc(params->buffer_size, GFP_KERNEL);
 		if (!newbuf)
 			return -ENOMEM;
 		spin_lock_irq(&runtime->lock);
@@ -888,9 +888,10 @@ static int snd_rawmidi_control_ioctl(struct snd_card *card,
  *
  * Return: The size of read data, or a negative error code on failure.
  */
-int snd_rawmidi_receive(struct snd_rawmidi_substream *substream,
-			const unsigned char *buffer, int count)
+int snd_rawmidi_receive(void *_substream, const void *_buffer, int count)
 {
+	struct snd_rawmidi_substream *substream = _substream;
+	const unsigned char *buffer = _buffer;
 	unsigned long flags;
 	int result = 0, count1;
 	struct snd_rawmidi_runtime *runtime = substream->runtime;

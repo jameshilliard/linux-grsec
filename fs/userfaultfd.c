@@ -432,7 +432,7 @@ static int userfaultfd_release(struct inode *inode, struct file *file)
 	struct userfaultfd_wake_range range = { .len = 0, };
 	unsigned long new_flags;
 
-	ACCESS_ONCE(ctx->released) = true;
+	ACCESS_ONCE_RW(ctx->released) = true;
 
 	/*
 	 * Flush page faults out of all CPUs. NOTE: all page faults

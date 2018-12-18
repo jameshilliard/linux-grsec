@@ -219,8 +219,8 @@ static int ip6_frag_queue(struct frag_queue *fq, struct sk_buff *skb,
 		goto err;
 
 	offset = ntohs(fhdr->frag_off) & ~0x7;
-	end = offset + (ntohs(ipv6_hdr(skb)->payload_len) -
-			((u8 *)(fhdr + 1) - (u8 *)(ipv6_hdr(skb) + 1)));
+	end = offset + ntohs(ipv6_hdr(skb)->payload_len);
+	end -= (u8 *)(fhdr + 1) - (u8 *)(ipv6_hdr(skb) + 1);
 
 	if ((unsigned int)end > IPV6_MAXPLEN) {
 		IP6_INC_STATS_BH(net, ip6_dst_idev(skb_dst(skb)),
@@ -628,12 +628,11 @@ static struct ctl_table ip6_frags_ctl_table[] = {
 
 static int __net_init ip6_frags_ns_sysctl_register(struct net *net)
 {
-	struct ctl_table *table;
+	ctl_table_no_const *table = NULL;
 	struct ctl_table_header *hdr;
 
-	table = ip6_frags_ns_ctl_table;
 	if (!net_eq(net, &init_net)) {
-		table = kmemdup(table, sizeof(ip6_frags_ns_ctl_table), GFP_KERNEL);
+		table = kmemdup(ip6_frags_ns_ctl_table, sizeof(ip6_frags_ns_ctl_table), GFP_KERNEL);
 		if (!table)
 			goto err_alloc;
 
@@ -647,9 +646,10 @@ static int __net_init ip6_frags_ns_sysctl_register(struct net *net)
 		/* Don't export sysctls to unprivileged users */
 		if (net->user_ns != &init_user_ns)
 			table[0].procname = NULL;
-	}
+		hdr = register_net_sysctl(net, "net/ipv6", table);
+	} else
+		hdr = register_net_sysctl(net, "net/ipv6", ip6_frags_ns_ctl_table);
 
-	hdr = register_net_sysctl(net, "net/ipv6", table);
 	if (!hdr)
 		goto err_reg;
 
@@ -657,8 +657,7 @@ static int __net_init ip6_frags_ns_sysctl_register(struct net *net)
 	return 0;
 
 err_reg:
-	if (!net_eq(net, &init_net))
-		kfree(table);
+	kfree(table);
 err_alloc:
 	return -ENOMEM;
 }

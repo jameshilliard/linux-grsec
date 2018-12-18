@@ -19,7 +19,7 @@ struct task_struct;
  * zero for an out of bounds index, or ~0 if within bounds [0, @size).
  */
 #ifndef array_index_mask_nospec
-static inline unsigned long array_index_mask_nospec(unsigned long index,
+static __always_inline unsigned long array_index_mask_nospec(unsigned long index,
 						    unsigned long size)
 {
 	/*

@@ -123,7 +123,7 @@ static int ipvlan_init(struct net_device *dev)
 
 	ipvlan_set_lockdep_class(dev);
 
-	ipvlan->pcpu_stats = alloc_percpu(struct ipvl_pcpu_stats);
+	ipvlan->pcpu_stats = netdev_alloc_pcpu_stats(struct ipvl_pcpu_stats);
 	if (!ipvlan->pcpu_stats)
 		return -ENOMEM;
 
@@ -751,15 +751,15 @@ static int ipvlan_addr4_event(struct notifier_block *unused,
 	return NOTIFY_OK;
 }
 
-static struct notifier_block ipvlan_addr4_notifier_block __read_mostly = {
+static struct notifier_block ipvlan_addr4_notifier_block = {
 	.notifier_call = ipvlan_addr4_event,
 };
 
-static struct notifier_block ipvlan_notifier_block __read_mostly = {
+static struct notifier_block ipvlan_notifier_block = {
 	.notifier_call = ipvlan_device_event,
 };
 
-static struct notifier_block ipvlan_addr6_notifier_block __read_mostly = {
+static struct notifier_block ipvlan_addr6_notifier_block = {
 	.notifier_call = ipvlan_addr6_event,
 };
 

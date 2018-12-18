@@ -2036,7 +2036,7 @@ static int kdb_lsmod(int argc, const char **argv)
 			continue;
 
 		kdb_printf("%-20s%8u  0x%p ", mod->name,
-			   mod->core_size, (void *)mod);
+			   mod->core_size_rx + mod->core_size_rw, (void *)mod);
 #ifdef CONFIG_MODULE_UNLOAD
 		kdb_printf("%4d ", module_refcount(mod));
 #endif
@@ -2046,7 +2046,7 @@ static int kdb_lsmod(int argc, const char **argv)
 			kdb_printf(" (Loading)");
 		else
 			kdb_printf(" (Live)");
-		kdb_printf(" 0x%p", mod->module_core);
+		kdb_printf(" 0x%p 0x%p", mod->module_core_rx,  mod->module_core_rw);
 
 #ifdef CONFIG_MODULE_UNLOAD
 		{

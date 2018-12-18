@@ -50,7 +50,7 @@ EXPORT_SYMBOL_GPL(svc_pool_map);
 static DEFINE_MUTEX(svc_pool_map_mutex);/* protects svc_pool_map.count only */
 
 static int
-param_set_pool_mode(const char *val, struct kernel_param *kp)
+param_set_pool_mode(const char *val, const struct kernel_param *kp)
 {
 	int *ip = (int *)kp->arg;
 	struct svc_pool_map *m = &svc_pool_map;
@@ -80,20 +80,20 @@ out:
 }
 
 static int
-param_get_pool_mode(char *buf, struct kernel_param *kp)
+param_get_pool_mode(char *buf, const struct kernel_param *kp)
 {
 	int *ip = (int *)kp->arg;
 
 	switch (*ip)
 	{
 	case SVC_POOL_AUTO:
-		return strlcpy(buf, "auto", 20);
+		return strlcpy_check(buf, "auto", 20);
 	case SVC_POOL_GLOBAL:
-		return strlcpy(buf, "global", 20);
+		return strlcpy_check(buf, "global", 20);
 	case SVC_POOL_PERCPU:
-		return strlcpy(buf, "percpu", 20);
+		return strlcpy_check(buf, "percpu", 20);
 	case SVC_POOL_PERNODE:
-		return strlcpy(buf, "pernode", 20);
+		return strlcpy_check(buf, "pernode", 20);
 	default:
 		return sprintf(buf, "%d", *ip);
 	}
@@ -1166,7 +1166,9 @@ svc_process_common(struct svc_rqst *rqstp, struct kvec *argv, struct kvec *resv)
 	svc_putnl(resv, RPC_SUCCESS);
 
 	/* Bump per-procedure stats counter */
-	procp->pc_count++;
+	pax_open_kernel();
+	(*(unsigned int *)&procp->pc_count)++;
+	pax_close_kernel();
 
 	/* Initialize storage for argp and resp */
 	memset(rqstp->rq_argp, 0, procp->pc_argsize);

@@ -110,7 +110,8 @@ int aa_audit_file(struct aa_profile *profile, struct file_perms *perms,
 	int type = AUDIT_APPARMOR_AUTO;
 	struct common_audit_data sa;
 	struct apparmor_audit_data aad = {0,};
-	sa.type = LSM_AUDIT_DATA_NONE;
+	sa.type = LSM_AUDIT_DATA_TASK;
+	sa.u.tsk = NULL;
 	sa.aad = &aad;
 	aad.op = op,
 	aad.fs.request = request;
@@ -348,8 +349,8 @@ static inline bool xindex_is_subset(u32 link, u32 target)
 int aa_path_link(struct aa_profile *profile, struct dentry *old_dentry,
 		 struct path *new_dir, struct dentry *new_dentry)
 {
-	struct path link = { new_dir->mnt, new_dentry };
-	struct path target = { new_dir->mnt, old_dentry };
+	struct path link = { .mnt = new_dir->mnt, .dentry = new_dentry };
+	struct path target = { .mnt = new_dir->mnt, .dentry = old_dentry };
 	struct path_cond cond = {
 		d_backing_inode(old_dentry)->i_uid,
 		d_backing_inode(old_dentry)->i_mode

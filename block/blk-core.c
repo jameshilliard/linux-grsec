@@ -3551,8 +3551,11 @@ int __init blk_dev_init(void)
 	if (!kblockd_workqueue)
 		panic("Failed to create kblockd\n");
 
-	request_cachep = kmem_cache_create("blkdev_requests",
-			sizeof(struct request), 0, SLAB_PANIC, NULL);
+	request_cachep = kmem_cache_create_usercopy("blkdev_requests",
+			sizeof(struct request), 0, SLAB_PANIC,
+			offsetof(struct request, __cmd),
+			sizeof(((struct request *)0)->__cmd),
+			NULL);
 
 	blk_requestq_cachep = kmem_cache_create("blkdev_queue",
 			sizeof(struct request_queue), 0, SLAB_PANIC, NULL);

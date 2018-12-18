@@ -406,6 +406,10 @@ EXPORT_SYMBOL_GPL(debugfs_create_file_size);
  * If debugfs is not enabled in the kernel, the value -%ENODEV will be
  * returned.
  */
+#ifdef CONFIG_GRKERNSEC_SYSFS_RESTRICT
+extern int grsec_enable_sysfs_restrict;
+#endif
+
 struct dentry *debugfs_create_dir(const char *name, struct dentry *parent)
 {
 	struct dentry *dentry = start_creating(name, parent);
@@ -418,7 +422,12 @@ struct dentry *debugfs_create_dir(const char *name, struct dentry *parent)
 	if (unlikely(!inode))
 		return failed_creating(dentry);
 
-	inode->i_mode = S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO;
+#ifdef CONFIG_GRKERNSEC_SYSFS_RESTRICT
+	if (grsec_enable_sysfs_restrict)
+		inode->i_mode = S_IFDIR | S_IRWXU;
+	else
+#endif
+		inode->i_mode = S_IFDIR | S_IRWXU | S_IRUGO | S_IXUGO;
 	inode->i_op = &simple_dir_inode_operations;
 	inode->i_fop = &simple_dir_operations;
 

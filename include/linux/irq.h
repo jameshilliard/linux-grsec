@@ -386,7 +386,11 @@ struct irq_chip {
 	int		(*irq_set_vcpu_affinity)(struct irq_data *data, void *vcpu_info);
 
 	unsigned long	flags;
-};
+} __do_const;
+#ifndef IRQ_CHIP_NO_CONST_DEFINED
+typedef struct irq_chip __no_const irq_chip_no_const;
+#define IRQ_CHIP_NO_CONST_DEFINED
+#endif
 
 /*
  * irq_chip specific flags

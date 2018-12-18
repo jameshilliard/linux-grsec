@@ -148,8 +148,9 @@
 #ifdef CONFIG_DYNAMIC_FTRACE
 
 ENTRY(function_hook)
+	pax_force_retaddr
 	retq
-END(function_hook)
+ENDPROC(function_hook)
 
 ENTRY(ftrace_caller)
 	/* save_mcount_regs fills in first two parameters */
@@ -181,9 +182,10 @@ GLOBAL(ftrace_graph_call)
 #endif
 
 /* This is weak to keep gas from relaxing the jumps */
-WEAK(ftrace_stub)
+RAP_WEAK(ftrace_stub)
+	pax_force_retaddr
 	retq
-END(ftrace_caller)
+ENDPROC(ftrace_caller)
 
 ENTRY(ftrace_regs_caller)
 	/* Save the current flags before any operations that can change them */
@@ -254,7 +256,7 @@ GLOBAL(ftrace_regs_caller_end)
 
 	jmp ftrace_return
 
-END(ftrace_regs_caller)
+ENDPROC(ftrace_regs_caller)
 
 
 #else /* ! CONFIG_DYNAMIC_FTRACE */
@@ -273,6 +275,7 @@ fgraph_trace:
 #endif
 
 GLOBAL(ftrace_stub)
+	pax_force_retaddr
 	retq
 
 trace:
@@ -287,11 +290,13 @@ trace:
 	 */
 
 	movq ftrace_trace_function, %r8
-	CALL_NOSPEC %r8
+	pax_force_fptr %r8
+	CALL_NOSPEC r8, ftrace_stub
+
 	restore_mcount_regs
 
 	jmp fgraph_trace
-END(function_hook)
+ENDPROC(function_hook)
 #endif /* CONFIG_DYNAMIC_FTRACE */
 #endif /* CONFIG_FUNCTION_TRACER */
 
@@ -313,8 +318,9 @@ ENTRY(ftrace_graph_caller)
 
 	restore_mcount_regs
 
+	pax_force_retaddr
 	retq
-END(ftrace_graph_caller)
+ENDPROC(ftrace_graph_caller)
 
 GLOBAL(return_to_handler)
 	subq  $24, %rsp
@@ -330,5 +336,7 @@ GLOBAL(return_to_handler)
 	movq 8(%rsp), %rdx
 	movq (%rsp), %rax
 	addq $24, %rsp
-	JMP_NOSPEC %rdi
+	pax_force_fptr %rdi
+	JMP_NOSPEC rdi
+ENDPROC(return_to_handler)
 #endif

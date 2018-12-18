@@ -12,6 +12,7 @@
  */
 #include <linux/mm.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/pci.h>

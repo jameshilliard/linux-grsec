@@ -37,6 +37,8 @@
 #include <linux/smp.h>
 #include <linux/io.h>
 
+#include <xen/xen.h>
+
 #ifdef CONFIG_EISA
 #include <linux/ioport.h>
 #include <linux/eisa.h>
@@ -70,7 +72,7 @@
 #include <asm/proto.h>
 
 /* No need to be aligned, but done to keep all IDTs defined the same way. */
-gate_desc debug_idt_table[NR_VECTORS] __page_aligned_bss;
+gate_desc debug_idt_table[NR_VECTORS] __page_aligned_rodata;
 #else
 #include <asm/processor-flags.h>
 #include <asm/setup.h>
@@ -78,7 +80,7 @@ gate_desc debug_idt_table[NR_VECTORS] __page_aligned_bss;
 #endif
 
 /* Must be page-aligned because the real IDT is used in a fixmap. */
-gate_desc idt_table[NR_VECTORS] __page_aligned_bss;
+gate_desc idt_table[NR_VECTORS] __page_aligned_rodata;
 
 DECLARE_BITMAP(used_vectors, NR_VECTORS);
 EXPORT_SYMBOL_GPL(used_vectors);
@@ -165,7 +167,7 @@ void ist_begin_non_atomic(struct pt_regs *regs)
 	 * will catch asm bugs and any attempt to use ist_preempt_enable
 	 * from double_fault.
 	 */
-	BUG_ON((unsigned long)(current_top_of_stack() -
+	BUG_ON((unsigned long)(current_top_of_stack(smp_processor_id()) -
 			       current_stack_pointer) >= THREAD_SIZE);
 
 	preempt_enable_no_resched();
@@ -182,7 +184,7 @@ void ist_end_non_atomic(void)
 }
 
 static nokprobe_inline int
-do_trap_no_signal(struct task_struct *tsk, int trapnr, char *str,
+do_trap_no_signal(struct task_struct *tsk, int trapnr, const char *str,
 		  struct pt_regs *regs,	long error_code)
 {
 	if (v8086_mode(regs)) {
@@ -199,9 +201,20 @@ do_trap_no_signal(struct task_struct *tsk, int trapnr, char *str,
 	}
 
 	if (!user_mode(regs)) {
-		if (!fixup_exception(regs)) {
+		if (!fixup_exception(regs, trapnr)) {
 			tsk->thread.error_code = error_code;
 			tsk->thread.trap_nr = trapnr;
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_KERNEXEC)
+			if (trapnr == X86_TRAP_SS && ((regs->cs & 0xFFFF) == __KERNEL_CS || (regs->cs & 0xFFFF) == __KERNEXEC_KERNEL_CS))
+				str = "PAX: suspicious stack segment fault";
+#endif
+
+#ifdef CONFIG_PAX_RAP
+			if (trapnr == X86_TRAP_UD)
+				str = "PAX: overwritten function pointer or return address detected";
+#endif
+
 			die(str, regs, error_code);
 		}
 		return 0;
@@ -242,7 +255,7 @@ static siginfo_t *fill_trap_info(struct pt_regs *regs, int signr, int trapnr,
 }
 
 static void
-do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
+do_trap(int trapnr, int signr, const char *str, struct pt_regs *regs,
 	long error_code, siginfo_t *info)
 {
 	struct task_struct *tsk = current;
@@ -266,7 +279,7 @@ do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
 	if (show_unhandled_signals && unhandled_signal(tsk, signr) &&
 	    printk_ratelimit()) {
 		pr_info("%s[%d] trap %s ip:%lx sp:%lx error:%lx",
-			tsk->comm, tsk->pid, str,
+			tsk->comm, task_pid_nr(tsk), str,
 			regs->ip, regs->sp, error_code);
 		print_vma_addr(" in ", regs->ip);
 		pr_cont("\n");
@@ -277,7 +290,7 @@ do_trap(int trapnr, int signr, char *str, struct pt_regs *regs,
 }
 NOKPROBE_SYMBOL(do_trap);
 
-static void do_error_trap(struct pt_regs *regs, long error_code, char *str,
+static void do_error_trap(struct pt_regs *regs, long error_code, const char *str,
 			  unsigned long trapnr, int signr)
 {
 	siginfo_t info;
@@ -306,6 +319,66 @@ DO_ERROR(X86_TRAP_TS,     SIGSEGV, "invalid TSS",		invalid_TSS)
 DO_ERROR(X86_TRAP_NP,     SIGBUS,  "segment not present",	segment_not_present)
 DO_ERROR(X86_TRAP_SS,     SIGBUS,  "stack segment",		stack_segment)
 DO_ERROR(X86_TRAP_AC,     SIGBUS,  "alignment check",		alignment_check)
+
+#ifdef CONFIG_PAX_REFCOUNT
+extern char __refcount_overflow_start[], __refcount_overflow_end[];
+extern char __refcount64_overflow_start[], __refcount64_overflow_end[];
+extern char __refcount_underflow_start[], __refcount_underflow_end[];
+extern char __refcount64_underflow_start[], __refcount64_underflow_end[];
+
+dotraplinkage void do_refcount_error(struct pt_regs *regs, long error_code)
+{
+	const char *str = NULL;
+
+	BUG_ON(!(regs->flags & X86_EFLAGS_OF));
+
+	regs->ip -= 2; // sizeof int $xx
+
+#define range_check(size, direction, type, value) \
+	if ((unsigned long)__##size##_##direction##_start <= regs->ip && \
+	    regs->ip < (unsigned long)__##size##_##direction##_end) { \
+		*(type *)regs->cx = value; \
+		str = #size " " #direction; \
+	}
+
+	range_check(refcount,   overflow,  int,       INT_MAX)
+	range_check(refcount64, overflow,  long long, LLONG_MAX)
+	range_check(refcount,   underflow, int,       INT_MIN)
+	range_check(refcount64, underflow, long long, LLONG_MIN)
+
+#undef range_check
+
+#ifdef CONFIG_MODULES
+	if (!str) {
+		struct module *mod;
+
+		preempt_disable();
+		mod = __module_text_address(regs->ip);
+		if (mod) {
+
+#define mod_range_check(mod, size, direction, type, value) \
+	if (regs->ip - (unsigned long)mod->size##_##direction##_start < (unsigned long)mod->size##_##direction##_size) { \
+		*(type *)regs->cx = value; \
+		str = #size " " #direction; \
+	}
+
+			mod_range_check(mod, refcount,   overflow,  int,       INT_MAX)
+			mod_range_check(mod, refcount64, overflow,  long long, LLONG_MAX)
+			mod_range_check(mod, refcount,   underflow, int,       INT_MIN)
+			mod_range_check(mod, refcount64, underflow, long long, LLONG_MIN)
+
+#undef mod_range_check
+
+		}
+		preempt_enable();
+	}
+#endif
+
+	BUG_ON(!str);
+	pax_report_refcount_error(regs, str);
+	do_error_trap(regs, error_code, str, X86_REFCOUNT_VECTOR, SIGILL);
+}
+#endif
 
 #ifdef CONFIG_X86_64
 /* Runs on IST stack */
@@ -346,6 +419,11 @@ dotraplinkage void do_double_fault(struct pt_regs *regs, long error_code)
 
 	tsk->thread.error_code = error_code;
 	tsk->thread.trap_nr = X86_TRAP_DF;
+
+#ifdef CONFIG_GRKERNSEC_KSTACKOVERFLOW
+	if ((unsigned long)tsk->stack - regs->sp <= PAGE_SIZE)
+		die("grsec: kernel stack overflow detected", regs, error_code);	
+#endif
 
 #ifdef CONFIG_DOUBLEFAULT
 	df_debug(regs, error_code);
@@ -437,6 +515,49 @@ exit_trap:
 	do_trap(X86_TRAP_BR, SIGSEGV, "bounds", regs, error_code, NULL);
 }
 
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+/*
+ * PaX: flip between expand-up and expand-down segments for allowing segneg
+ * TLS userland to make forward progress. Ideally this will never get called
+ * when userland is recompiled with -mno-tls-direct-seg-refs (like how the
+ * nosegneg glibc is built).
+ */
+static bool fixup_uderef_exception(struct pt_regs *regs)
+{
+	unsigned char seg;
+	unsigned int idx, sel;
+	const struct desc_struct *desc;
+
+	if (get_user(seg, (unsigned char __user *)regs->ip))
+		return false;
+
+	/* handle the simplest code for now: TLS %gs prefix at the front */
+	if (seg != 0x65)
+		return false;
+	if (regs->gs & SEGMENT_TI_MASK)
+		return false;
+	if ((regs->gs & SEGMENT_RPL_MASK) != USER_RPL)
+		return false;
+
+	idx = regs->gs >> 3;
+	if (GDT_ENTRY_TLS_MIN <= idx && idx <= GDT_ENTRY_TLS_MAX) {
+		desc = &current->thread.tls_array_inverted[idx - GDT_ENTRY_TLS_MIN];
+		sel = regs->gs + GDT_ENTRY_TLS_ENTRIES * 8;
+	} else if (GDT_ENTRY_TLS_MIN + GDT_ENTRY_TLS_ENTRIES <= idx && idx <= GDT_ENTRY_TLS_MAX + GDT_ENTRY_TLS_ENTRIES) {
+		desc = &current->thread.tls_array[idx - GDT_ENTRY_TLS_MIN - GDT_ENTRY_TLS_ENTRIES];
+		sel = regs->gs - GDT_ENTRY_TLS_ENTRIES * 8;
+	} else
+		return false;
+
+	if (desc_empty(desc))
+		return false;
+
+	regs->gs = sel;
+
+	return true;
+}
+#endif
+
 dotraplinkage void
 do_general_protection(struct pt_regs *regs, long error_code)
 {
@@ -444,6 +565,13 @@ do_general_protection(struct pt_regs *regs, long error_code)
 
 	RCU_LOCKDEP_WARN(!rcu_is_watching(), "entry code didn't wake RCU");
 	conditional_sti(regs);
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (static_cpu_has(X86_FEATURE_UDEREF) && boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN)) {
+		if (user_mode(regs) && !v8086_mode(regs) && fixup_uderef_exception(regs))
+			return;
+	}
+#endif
 
 	if (v8086_mode(regs)) {
 		local_irq_enable();
@@ -453,16 +581,40 @@ do_general_protection(struct pt_regs *regs, long error_code)
 
 	tsk = current;
 	if (!user_mode(regs)) {
-		if (fixup_exception(regs))
+		if (fixup_exception(regs, X86_TRAP_GP))
 			return;
 
 		tsk->thread.error_code = error_code;
 		tsk->thread.trap_nr = X86_TRAP_GP;
 		if (notify_die(DIE_GPF, "general protection fault", regs, error_code,
-			       X86_TRAP_GP, SIGSEGV) != NOTIFY_STOP)
+			       X86_TRAP_GP, SIGSEGV) != NOTIFY_STOP) {
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_KERNEXEC)
+			if ((regs->cs & 0xFFFF) == __KERNEL_CS || (regs->cs & 0xFFFF) == __KERNEXEC_KERNEL_CS)
+				die("PAX: suspicious general protection fault", regs, error_code);
+			else
+#endif
+
 			die("general protection fault", regs, error_code);
+		}
 		return;
 	}
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_PAGEEXEC)
+	if (!(__supported_pte_mask & _PAGE_NX) && tsk->mm && (tsk->mm->pax_flags & MF_PAX_PAGEEXEC)) {
+		struct mm_struct *mm = tsk->mm;
+		unsigned long limit;
+
+		down_write(&mm->mmap_sem);
+		limit = mm->context.user_cs_limit;
+		if (limit < TASK_SIZE) {
+			track_exec_limit(mm, limit, TASK_SIZE, VM_EXEC);
+			up_write(&mm->mmap_sem);
+			return;
+		}
+		up_write(&mm->mmap_sem);
+	}
+#endif
 
 	tsk->thread.error_code = error_code;
 	tsk->thread.trap_nr = X86_TRAP_GP;
@@ -535,8 +687,9 @@ NOKPROBE_SYMBOL(do_int3);
  */
 asmlinkage __visible notrace struct pt_regs *sync_regs(struct pt_regs *eregs)
 {
-	struct pt_regs *regs = task_pt_regs(current);
-	*regs = *eregs;
+	struct pt_regs *regs = (struct pt_regs *)this_cpu_read(cpu_current_top_of_stack) - 1;
+	if (regs != eregs)
+		*regs = *eregs;
 	return regs;
 }
 NOKPROBE_SYMBOL(sync_regs);
@@ -557,8 +710,10 @@ struct bad_iret_stack *fixup_bad_iret(struct bad_iret_stack *s)
 	 * iret target.
 	 */
 	struct bad_iret_stack *new_stack =
-		container_of(task_pt_regs(current),
-			     struct bad_iret_stack, regs);
+		(struct bad_iret_stack *)(cpu_tss[raw_smp_processor_id()].x86_tss.sp0) - 1;
+
+	if ((current->thread.sp0 ^ (unsigned long)s) < THREAD_SIZE)
+		new_stack = s;
 
 	/* Copy the IRET target to the new stack. */
 	memmove(&new_stack->regs.ip, (void *)s->regs.sp, 5*8);
@@ -695,16 +850,18 @@ static void math_error(struct pt_regs *regs, int error_code, int trapnr)
 	char *str = (trapnr == X86_TRAP_MF) ? "fpu exception" :
 						"simd exception";
 
-	if (notify_die(DIE_TRAP, str, regs, error_code, trapnr, SIGFPE) == NOTIFY_STOP)
-		return;
 	conditional_sti(regs);
 
 	if (!user_mode(regs)) {
-		if (!fixup_exception(regs)) {
-			task->thread.error_code = error_code;
-			task->thread.trap_nr = trapnr;
+		if (fixup_exception(regs, trapnr))
+			return;
+
+		task->thread.error_code = error_code;
+		task->thread.trap_nr = trapnr;
+
+		if (notify_die(DIE_TRAP, str, regs, error_code,
+					trapnr, SIGFPE) != NOTIFY_STOP)
 			die(str, regs, error_code);
-		}
 		return;
 	}
 
@@ -805,7 +962,7 @@ void __init early_trap_init(void)
 	 * since we don't have trace_debug and it will be reset to
 	 * 'debug' in trap_init() by set_intr_gate_ist().
 	 */
-	set_intr_gate_notrace(X86_TRAP_DB, debug);
+	set_intr_gate_notrace(X86_TRAP_DB, int1);
 	/* int3 can be called from all */
 	set_system_intr_gate(X86_TRAP_BP, &int3);
 #ifdef CONFIG_X86_32
@@ -824,14 +981,23 @@ void __init early_trap_pf_init(void)
 void __init trap_init(void)
 {
 	int i;
+#ifdef CONFIG_EISA
+	void __iomem *p;
+#endif
 
 #ifdef CONFIG_EISA
-	void __iomem *p = early_ioremap(0x0FFFD9, 4);
+	if (xen_pv_domain() && !xen_initial_domain())
+		goto skip_eisa_probe;
 
-	if (readl(p) == 'E' + ('I'<<8) + ('S'<<16) + ('A'<<24))
+	p = early_ioremap(0x0FFFD9, 4);
+
+	if (p && readl(p) == 'E' + ('I'<<8) + ('S'<<16) + ('A'<<24))
 		EISA_bus = 1;
 	early_iounmap(p, 4);
+skip_eisa_probe:
 #endif
+
+	setup_cpu_entry_areas();
 
 	set_intr_gate(X86_TRAP_DE, divide_error);
 	set_intr_gate_ist(X86_TRAP_NMI, &nmi, NMI_STACK);
@@ -872,13 +1038,24 @@ void __init trap_init(void)
 	set_bit(IA32_SYSCALL_VECTOR, used_vectors);
 #endif
 
+#ifdef CONFIG_PAX_REFCOUNT
+	set_intr_gate(X86_REFCOUNT_VECTOR, refcount_error);
+	set_bit(X86_REFCOUNT_VECTOR, used_vectors);
+#endif
+
 	/*
 	 * Set the IDT descriptor to a fixed read-only location, so that the
 	 * "sidt" instruction will not leak the location of the kernel, and
 	 * to defend the IDT against arbitrary memory write vulnerabilities.
 	 * It will be reloaded in cpu_init() */
+#ifdef CONFIG_X86_64
+	cea_set_pte(CPU_ENTRY_AREA_RO_IDT_VADDR, __pa_symbol(idt_table),
+		    PAGE_KERNEL_RO);
+	idt_descr.address = CPU_ENTRY_AREA_RO_IDT;
+#else
 	__set_fixmap(FIX_RO_IDT, __pa_symbol(idt_table), PAGE_KERNEL_RO);
 	idt_descr.address = fix_to_virt(FIX_RO_IDT);
+#endif
 
 	/*
 	 * Should be a barrier for any external CPU state:
@@ -890,12 +1067,12 @@ void __init trap_init(void)
 	 * IST works only after cpu_init() loads TSS. See comments
 	 * in early_trap_init().
 	 */
-	set_intr_gate_ist(X86_TRAP_DB, &debug, DEBUG_STACK);
+	set_intr_gate_ist(X86_TRAP_DB, &int1, DEBUG_STACK);
 
 	x86_init.irqs.trap_init();
 
 #ifdef CONFIG_X86_64
 	memcpy(&debug_idt_table, &idt_table, IDT_ENTRIES * 16);
-	set_nmi_gate(X86_TRAP_DB, &debug);
+	set_nmi_gate(X86_TRAP_DB, &int1);
 #endif
 }

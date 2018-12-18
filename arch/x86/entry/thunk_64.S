@@ -8,6 +8,7 @@
 #include <linux/linkage.h>
 #include "calling.h"
 #include <asm/asm.h>
+#include <asm/nospec-branch.h>
 
 	/* rdi:	arg1 ... normal C conventions. rax is saved/restored. */
 	.macro THUNK name, func, put_ret_addr_in_rdi=0
@@ -62,6 +63,7 @@ restore:
 	popq %rdx
 	popq %rsi
 	popq %rdi
+	pax_force_retaddr
 	ret
 	_ASM_NOKPROBE(restore)
 #endif

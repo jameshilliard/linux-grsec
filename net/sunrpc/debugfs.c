@@ -237,13 +237,13 @@ void
 rpc_xprt_debugfs_register(struct rpc_xprt *xprt)
 {
 	int len, id;
-	static atomic_t	cur_id;
+	static atomic_unchecked_t	cur_id;
 	char		name[9]; /* 8 hex digits + NULL term */
 
 	if (!rpc_xprt_dir)
 		return;
 
-	id = (unsigned int)atomic_inc_return(&cur_id);
+	id = (unsigned int)atomic_inc_return_unchecked(&cur_id);
 
 	len = snprintf(name, sizeof(name), "%x", id);
 	if (len >= sizeof(name))

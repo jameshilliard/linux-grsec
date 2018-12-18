@@ -9,6 +9,7 @@
 #include <asm/boot.h>
 #include <asm/asm.h>
 #include <asm/page_types.h>
+#include <asm/nospec-branch.h>
 
 #include <xen/interface/elfnote.h>
 #include <xen/interface/features.h>
@@ -41,6 +42,17 @@ ENTRY(startup_xen)
 #ifdef CONFIG_X86_32
 	mov %esi,xen_start_info
 	mov $init_thread_union+THREAD_SIZE,%esp
+#ifdef CONFIG_SMP
+	movl $cpu_gdt_table,%edi
+	movl $__per_cpu_load,%eax
+	movw %ax,__KERNEL_PERCPU + 2(%edi)
+	rorl $16,%eax
+	movb %al,__KERNEL_PERCPU + 4(%edi)
+	movb %ah,__KERNEL_PERCPU + 7(%edi)
+	movl $__per_cpu_end - 1,%eax
+	subl $__per_cpu_start,%eax
+	movw %ax,__KERNEL_PERCPU + 0(%edi)
+#endif
 #else
 	mov %rsi,xen_start_info
 	mov $init_thread_union+THREAD_SIZE,%rsp

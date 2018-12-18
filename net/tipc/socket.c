@@ -867,7 +867,7 @@ static int __tipc_sendmsg(struct socket *sock, struct msghdr *m, size_t dsz)
 	struct tipc_sock *tsk = tipc_sk(sk);
 	struct net *net = sock_net(sk);
 	struct tipc_msg *mhdr = &tsk->phdr;
-	u32 dnode, dport;
+	u32 dport, dnode = 0;
 	struct sk_buff_head pktchain;
 	struct sk_buff *skb;
 	struct tipc_name_seq *seq;
@@ -927,6 +927,8 @@ static int __tipc_sendmsg(struct socket *sock, struct msghdr *m, size_t dsz)
 		msg_set_destnode(mhdr, dnode);
 		msg_set_destport(mhdr, dest->addr.id.ref);
 		msg_set_hdr_sz(mhdr, BASIC_H_SIZE);
+	} else {
+		return -EINVAL;
 	}
 
 	skb_queue_head_init(&pktchain);
@@ -1499,7 +1501,7 @@ static void tipc_write_space(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (wq_has_sleeper(wq))
+	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_sync_poll(&wq->wait, POLLOUT |
 						POLLWRNORM | POLLWRBAND);
 	rcu_read_unlock();
@@ -1516,7 +1518,7 @@ static void tipc_data_ready(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (wq_has_sleeper(wq))
+	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_sync_poll(&wq->wait, POLLIN |
 						POLLRDNORM | POLLRDBAND);
 	rcu_read_unlock();

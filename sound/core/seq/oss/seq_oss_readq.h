@@ -43,7 +43,7 @@ struct seq_oss_readq *snd_seq_oss_readq_new(struct seq_oss_devinfo *dp, int maxl
 void snd_seq_oss_readq_delete(struct seq_oss_readq *q);
 void snd_seq_oss_readq_clear(struct seq_oss_readq *readq);
 unsigned int snd_seq_oss_readq_poll(struct seq_oss_readq *readq, struct file *file, poll_table *wait);
-int snd_seq_oss_readq_puts(struct seq_oss_readq *readq, int dev, unsigned char *data, int len);
+int snd_seq_oss_readq_puts(struct seq_oss_readq *readq, int dev, const unsigned char *data, int len);
 int snd_seq_oss_readq_sysex(struct seq_oss_readq *q, int dev,
 			    struct snd_seq_event *ev);
 int snd_seq_oss_readq_put_event(struct seq_oss_readq *readq, union evrec *ev);

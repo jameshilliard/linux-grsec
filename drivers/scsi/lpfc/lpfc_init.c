@@ -11021,7 +11021,7 @@ lpfc_pci_resume_one(struct pci_dev *pdev)
  * 	PCI_ERS_RESULT_DISCONNECT - device could not be recovered
  **/
 static pci_ers_result_t
-lpfc_io_error_detected(struct pci_dev *pdev, pci_channel_state_t state)
+lpfc_io_error_detected(struct pci_dev *pdev, enum pci_channel_state state)
 {
 	struct Scsi_Host *shost = pci_get_drvdata(pdev);
 	struct lpfc_hba *phba = ((struct lpfc_vport *)shost->hostdata)->phba;
@@ -11430,8 +11430,10 @@ lpfc_init(void)
 			"misc_register returned with status %d", error);
 
 	if (lpfc_enable_npiv) {
-		lpfc_transport_functions.vport_create = lpfc_vport_create;
-		lpfc_transport_functions.vport_delete = lpfc_vport_delete;
+		pax_open_kernel();
+		const_cast(lpfc_transport_functions.vport_create) = lpfc_vport_create;
+		const_cast(lpfc_transport_functions.vport_delete) = lpfc_vport_delete;
+		pax_close_kernel();
 	}
 	lpfc_transport_template =
 				fc_attach_transport(&lpfc_transport_functions);

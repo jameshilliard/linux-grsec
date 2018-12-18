@@ -378,7 +378,7 @@ static int ieee80211_get_key(struct wiphy *wiphy, struct net_device *dev,
 			drv_get_key_seq(sdata->local, key, &kseq);
 			memcpy(seq, kseq.ccmp.pn, 6);
 		} else {
-			pn64 = atomic64_read(&key->conf.tx_pn);
+			pn64 = atomic64_read_unchecked(&key->conf.tx_pn);
 			seq[0] = pn64;
 			seq[1] = pn64 >> 8;
 			seq[2] = pn64 >> 16;
@@ -540,7 +540,7 @@ static int ieee80211_set_monitor_channel(struct wiphy *wiphy,
 			ret = ieee80211_vif_use_channel(sdata, chandef,
 					IEEE80211_CHANCTX_EXCLUSIVE);
 		}
-	} else if (local->open_count == local->monitors) {
+	} else if (local_read(&local->open_count) == local->monitors) {
 		local->_oper_chandef = *chandef;
 		ieee80211_hw_config(local, 0);
 	}
@@ -3513,7 +3513,7 @@ static void ieee80211_mgmt_frame_register(struct wiphy *wiphy,
 				sdata->vif.probe_req_reg--;
 		}
 
-		if (!local->open_count)
+		if (!local_read(&local->open_count))
 			break;
 
 		if (sdata->vif.probe_req_reg == 1)
@@ -3669,8 +3669,8 @@ static int ieee80211_cfg_get_channel(struct wiphy *wiphy,
 	if (chanctx_conf) {
 		*chandef = sdata->vif.bss_conf.chandef;
 		ret = 0;
-	} else if (local->open_count > 0 &&
-		   local->open_count == local->monitors &&
+	} else if (local_read(&local->open_count) > 0 &&
+		   local_read(&local->open_count) == local->monitors &&
 		   sdata->vif.type == NL80211_IFTYPE_MONITOR) {
 		if (local->use_chanctx)
 			*chandef = local->monitor_chandef;

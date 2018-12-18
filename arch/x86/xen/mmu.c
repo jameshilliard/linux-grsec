@@ -479,14 +479,13 @@ static void xen_set_pud(pud_t *ptr, pud_t val)
 static void xen_set_pte_atomic(pte_t *ptep, pte_t pte)
 {
 	trace_xen_mmu_set_pte_atomic(ptep, pte);
-	set_64bit((u64 *)ptep, native_pte_val(pte));
+	__xen_set_pte(ptep, pte);
 }
 
 static void xen_pte_clear(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
 {
 	trace_xen_mmu_pte_clear(mm, addr, ptep);
-	if (!xen_batched_set_pte(ptep, native_make_pte(0)))
-		native_pte_clear(mm, addr, ptep);
+	__xen_set_pte(ptep, native_make_pte(0));
 }
 
 static void xen_pmd_clear(pmd_t *pmdp)
@@ -1603,7 +1602,7 @@ static void __init xen_set_pte_init(pte_t *ptep, pte_t pte)
 	else
 		pte = __pte_ma(0);
 
-	native_set_pte(ptep, pte);
+	__xen_set_pte(ptep, pte);
 }
 
 /* Early in boot, while setting up the initial pagetable, assume
@@ -1941,7 +1940,8 @@ void __init xen_setup_kernel_pagetable(pgd_t *pgd, unsigned long max_pfn)
 		convert_pfn_mfn(init_level4_pgt);
 
 		/* L3_i[0] -> level2_ident_pgt */
-		convert_pfn_mfn(level3_ident_pgt);
+		convert_pfn_mfn(level3_ident_pgt[0]);
+		convert_pfn_mfn(level3_vmemmap_pgt);
 		/* L3_k[510] -> level2_kernel_pgt
 		 * L3_k[511] -> level2_fixmap_pgt */
 		convert_pfn_mfn(level3_kernel_pgt);
@@ -1973,14 +1973,45 @@ void __init xen_setup_kernel_pagetable(pgd_t *pgd, unsigned long max_pfn)
 
 	if (!xen_feature(XENFEAT_auto_translated_physmap)) {
 		/* Make pagetable pieces RO */
+#ifdef CONFIG_PAX_PER_CPU_PGD
+		set_page_prot(init_level4_pgt + 0*512, PAGE_KERNEL_RO);
+		set_page_prot(init_level4_pgt + 1*512, PAGE_KERNEL_RO);
+		set_page_prot(init_level4_pgt + 2*512, PAGE_KERNEL_RO);
+		set_page_prot(init_level4_pgt + 3*512, PAGE_KERNEL_RO);
+#elif defined(CONFIG_PAGE_TABLE_ISOLATION)
+		set_page_prot(init_level4_pgt + 0*512, PAGE_KERNEL_RO);
+		set_page_prot(init_level4_pgt + 1*512, PAGE_KERNEL_RO);
+#else
 		set_page_prot(init_level4_pgt, PAGE_KERNEL_RO);
-		set_page_prot(level3_ident_pgt, PAGE_KERNEL_RO);
+#endif
+		set_page_prot(level3_ident_pgt[0], PAGE_KERNEL_RO);
+		set_page_prot(level3_ident_pgt[1], PAGE_KERNEL_RO);
+		set_page_prot(level3_ident_pgt[2], PAGE_KERNEL_RO);
+		set_page_prot(level3_ident_pgt[3], PAGE_KERNEL_RO);
+		set_page_prot(level3_vmalloc_start_pgt[0], PAGE_KERNEL_RO);
+		set_page_prot(level3_vmalloc_start_pgt[1], PAGE_KERNEL_RO);
+		set_page_prot(level3_vmalloc_start_pgt[2], PAGE_KERNEL_RO);
+		set_page_prot(level3_vmalloc_start_pgt[3], PAGE_KERNEL_RO);
+		set_page_prot(level3_vmalloc_end_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level3_vmemmap_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level3_cpu_entry_area_pgt, PAGE_KERNEL_RO);
 		set_page_prot(level3_kernel_pgt, PAGE_KERNEL_RO);
 		set_page_prot(level3_user_vsyscall, PAGE_KERNEL_RO);
-		set_page_prot(level2_ident_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level2_vmemmap_pgt, PAGE_KERNEL_RO);
 		set_page_prot(level2_kernel_pgt, PAGE_KERNEL_RO);
 		set_page_prot(level2_fixmap_pgt, PAGE_KERNEL_RO);
-		set_page_prot(level1_fixmap_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level2_ident_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level1_modules_pgt[0], PAGE_KERNEL_RO);
+		set_page_prot(level1_modules_pgt[1], PAGE_KERNEL_RO);
+		set_page_prot(level1_modules_pgt[2], PAGE_KERNEL_RO);
+		set_page_prot(level1_modules_pgt[3], PAGE_KERNEL_RO);
+		set_page_prot(level1_fixmap_pgt[0], PAGE_KERNEL_RO);
+		set_page_prot(level1_fixmap_pgt[1], PAGE_KERNEL_RO);
+		set_page_prot(level1_fixmap_pgt[2], PAGE_KERNEL_RO);
+		set_page_prot(level1_vsyscall_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level3_shadow_kernel_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level2_shadow_kernel_pgt, PAGE_KERNEL_RO);
+		set_page_prot(level1_shadow_kernel_pgt, PAGE_KERNEL_RO);
 
 		/* Pin down new L4 */
 		pin_pagetable_pfn(MMUEXT_PIN_L4_TABLE,
@@ -2327,7 +2358,6 @@ static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 
 	switch (idx) {
 	case FIX_BTMAP_END ... FIX_BTMAP_BEGIN:
-	case FIX_RO_IDT:
 #ifdef CONFIG_X86_32
 	case FIX_WP_TEST:
 # ifdef CONFIG_HIGHMEM
@@ -2420,6 +2450,14 @@ static void xen_leave_lazy_mmu(void)
 	preempt_enable();
 }
 
+static void xen_pte_update(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+{
+}
+
+static void xen_pte_update_defer(struct mm_struct *mm, unsigned long addr, pte_t *ptep)
+{
+}
+
 static const struct pv_mmu_ops xen_mmu_ops __initconst = {
 	.read_cr2 = xen_read_cr2,
 	.write_cr2 = xen_write_cr2,
@@ -2432,8 +2470,8 @@ static const struct pv_mmu_ops xen_mmu_ops __initconst = {
 	.flush_tlb_single = xen_flush_tlb_single,
 	.flush_tlb_others = xen_flush_tlb_others,
 
-	.pte_update = paravirt_nop,
-	.pte_update_defer = paravirt_nop,
+	.pte_update = xen_pte_update,
+	.pte_update_defer = xen_pte_update_defer,
 
 	.pgd_alloc = xen_pgd_alloc,
 	.pgd_free = xen_pgd_free,
@@ -2450,11 +2488,11 @@ static const struct pv_mmu_ops xen_mmu_ops __initconst = {
 	.ptep_modify_prot_start = __ptep_modify_prot_start,
 	.ptep_modify_prot_commit = __ptep_modify_prot_commit,
 
-	.pte_val = PV_CALLEE_SAVE(xen_pte_val),
-	.pgd_val = PV_CALLEE_SAVE(xen_pgd_val),
+	.pte_val = PV_CALLEE_SAVE(pte_val, xen_pte_val),
+	.pgd_val = PV_CALLEE_SAVE(pgd_val, xen_pgd_val),
 
-	.make_pte = PV_CALLEE_SAVE(xen_make_pte),
-	.make_pgd = PV_CALLEE_SAVE(xen_make_pgd),
+	.make_pte = PV_CALLEE_SAVE(make_pte, xen_make_pte),
+	.make_pgd = PV_CALLEE_SAVE(make_pgd, xen_make_pgd),
 
 #ifdef CONFIG_X86_PAE
 	.set_pte_atomic = xen_set_pte_atomic,
@@ -2463,12 +2501,12 @@ static const struct pv_mmu_ops xen_mmu_ops __initconst = {
 #endif	/* CONFIG_X86_PAE */
 	.set_pud = xen_set_pud_hyper,
 
-	.make_pmd = PV_CALLEE_SAVE(xen_make_pmd),
-	.pmd_val = PV_CALLEE_SAVE(xen_pmd_val),
+	.make_pmd = PV_CALLEE_SAVE(make_pmd, xen_make_pmd),
+	.pmd_val = PV_CALLEE_SAVE(pmd_val, xen_pmd_val),
 
 #if CONFIG_PGTABLE_LEVELS == 4
-	.pud_val = PV_CALLEE_SAVE(xen_pud_val),
-	.make_pud = PV_CALLEE_SAVE(xen_make_pud),
+	.pud_val = PV_CALLEE_SAVE(pud_val, xen_pud_val),
+	.make_pud = PV_CALLEE_SAVE(make_pud, xen_make_pud),
 	.set_pgd = xen_set_pgd_hyper,
 
 	.alloc_pud = xen_alloc_pmd_init,

@@ -130,6 +130,8 @@ struct cpuinfo_x86 {
 	u16			booted_cores;
 	/* Physical processor id: */
 	u16			phys_proc_id;
+	/* Logical processor id: */
+	u16			logical_proc_id;
 	/* Core id: */
 	u16			cpu_core_id;
 	/* Compute unit id */
@@ -137,7 +139,7 @@ struct cpuinfo_x86 {
 	/* Index into per_cpu list: */
 	u16			cpu_index;
 	u32			microcode;
-};
+} __randomize_layout;
 
 #define X86_VENDOR_INTEL	0
 #define X86_VENDOR_CYRIX	1
@@ -187,8 +189,9 @@ void print_cpu_msr(struct cpuinfo_x86 *);
 extern void init_scattered_cpuid_features(struct cpuinfo_x86 *c);
 extern unsigned int init_intel_cacheinfo(struct cpuinfo_x86 *c);
 extern void init_amd_cacheinfo(struct cpuinfo_x86 *c);
-
-extern void detect_extended_topology(struct cpuinfo_x86 *c);
+extern int detect_extended_topology_early(struct cpuinfo_x86 *c);
+extern int detect_extended_topology(struct cpuinfo_x86 *c);
+extern int detect_ht_early(struct cpuinfo_x86 *c);
 extern void detect_ht(struct cpuinfo_x86 *c);
 
 #ifdef CONFIG_X86_32
@@ -212,9 +215,13 @@ static inline void native_cpuid(unsigned int *eax, unsigned int *ebx,
 	    : "memory");
 }
 
+#define PCID_KERNEL		0UL
+#define PCID_USER		1UL
+#define PCID_NOFLUSH		(1UL << 63)
+
 static inline void load_cr3(pgd_t *pgdir)
 {
-	write_cr3(__pa(pgdir));
+	write_cr3(__pa(pgdir) | PCID_KERNEL);
 }
 
 #ifdef CONFIG_X86_32
@@ -287,8 +294,16 @@ struct x86_hw_tss {
 #define IO_BITMAP_BITS			65536
 #define IO_BITMAP_BYTES			(IO_BITMAP_BITS/8)
 #define IO_BITMAP_LONGS			(IO_BITMAP_BYTES/sizeof(long))
-#define IO_BITMAP_OFFSET		offsetof(struct tss_struct, io_bitmap)
+#define IO_BITMAP_OFFSET		(offsetof(struct tss_struct, io_bitmap) - offsetof(struct tss_struct, x86_tss))
 #define INVALID_IO_BITMAP_OFFSET	0x8000
+
+struct entry_stack {
+	unsigned long		words[64];
+};
+
+struct entry_stack_page {
+	struct entry_stack stack;
+} __aligned(PAGE_SIZE);
 
 struct tss_struct {
 	/*
@@ -304,18 +319,28 @@ struct tss_struct {
 	 */
 	unsigned long		io_bitmap[IO_BITMAP_LONGS + 1];
 
+#ifdef CONFIG_X86_32
 	/*
 	 * Space for the temporary SYSENTER stack:
 	 */
 	unsigned long		SYSENTER_stack[64];
-
-} ____cacheline_aligned;
-
-DECLARE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(struct tss_struct, cpu_tss);
-
-#ifdef CONFIG_X86_32
-DECLARE_PER_CPU(unsigned long, cpu_current_top_of_stack);
 #endif
+
+} __aligned(PAGE_SIZE);
+
+extern struct tss_struct cpu_tss[NR_CPUS];
+
+/*
+ * sizeof(unsigned long) coming from an extra "long" at the end
+ * of the iobitmap.
+ *
+ * -1? seg base+limit should be pointing to the address of the
+ * last valid byte
+ */
+#define __KERNEL_TSS_LIMIT	\
+	(IO_BITMAP_OFFSET + IO_BITMAP_BYTES + sizeof(unsigned long) - 1)
+
+DECLARE_PER_CPU_USER_MAPPED(unsigned long, cpu_current_top_of_stack);
 
 /*
  * Save the original ist values for checking stack pointers during debugging
@@ -344,6 +369,7 @@ DECLARE_PER_CPU_FIRST(union irq_stack_union, irq_stack_union) __visible;
 DECLARE_INIT_PER_CPU(irq_stack_union);
 
 DECLARE_PER_CPU(char *, irq_stack_ptr);
+DECLARE_PER_CPU(char *, irq_stack_ptr_lowmem);
 DECLARE_PER_CPU(unsigned int, irq_count);
 extern asmlinkage void ignore_sysret(void);
 #else	/* X86_64 */
@@ -378,6 +404,9 @@ struct perf_event;
 struct thread_struct {
 	/* Cached TLS descriptors: */
 	struct desc_struct	tls_array[GDT_ENTRY_TLS_ENTRIES];
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	struct desc_struct	tls_array_inverted[GDT_ENTRY_TLS_ENTRIES];
+#endif
 	unsigned long		sp0;
 	unsigned long		sp;
 #ifdef CONFIG_X86_32
@@ -387,6 +416,7 @@ struct thread_struct {
 	unsigned short		ds;
 	unsigned short		fsindex;
 	unsigned short		gsindex;
+	unsigned short		ss;
 #endif
 #ifdef CONFIG_X86_32
 	unsigned long		ip;
@@ -395,6 +425,9 @@ struct thread_struct {
 	unsigned long		fs;
 #endif
 	unsigned long		gs;
+
+	/* Floating point and extended processor state */
+	struct fpu		fpu;
 
 	/* Save middle states of ptrace breakpoints */
 	struct perf_event	*ptrace_bps[HBP_NUM];
@@ -415,13 +448,6 @@ struct thread_struct {
 	unsigned long		iopl;
 	/* Max allowed port in the bitmap, in bytes: */
 	unsigned		io_bitmap_max;
-
-	/* Floating point and extended processor state */
-	struct fpu		fpu;
-	/*
-	 * WARNING: 'fpu' is dynamically-sized.  It *MUST* be at
-	 * the end.
-	 */
 };
 
 /*
@@ -463,14 +489,9 @@ static inline void native_swapgs(void)
 #endif
 }
 
-static inline unsigned long current_top_of_stack(void)
+static inline unsigned long current_top_of_stack(unsigned int cpu)
 {
-#ifdef CONFIG_X86_64
-	return this_cpu_read_stable(cpu_tss.x86_tss.sp0);
-#else
-	/* sp0 on x86_32 is special in and around vm86 mode. */
 	return this_cpu_read_stable(cpu_current_top_of_stack);
-#endif
 }
 
 #ifdef CONFIG_PARAVIRT
@@ -620,8 +641,8 @@ extern int sysenter_setup(void);
 extern void early_trap_init(void);
 void early_trap_pf_init(void);
 
-/* Defined in head.S */
-extern struct desc_ptr		early_gdt_descr;
+/* Defined in head{32,64}.c */
+extern struct desc_ptr		early_gdt_descr __read_only;
 
 extern void cpu_set_gdt(int);
 extern void switch_to_new_gdt(int);
@@ -702,19 +723,31 @@ static inline void spin_lock_prefetch(const void *x)
 #define TOP_OF_INIT_STACK ((unsigned long)&init_stack + sizeof(init_stack) - \
 			   TOP_OF_KERNEL_STACK_PADDING)
 
+#define task_top_of_stack(task) ((task)->thread.sp0)
+
+extern union fpregs_state init_fpregs_state;
+
 #ifdef CONFIG_X86_32
 /*
  * User space process size: 3GB (default).
  */
 #define TASK_SIZE		PAGE_OFFSET
 #define TASK_SIZE_MAX		TASK_SIZE
+
+#ifdef CONFIG_PAX_SEGMEXEC
+#define SEGMEXEC_TASK_SIZE	(TASK_SIZE / 2)
+#define STACK_TOP		((current->mm->pax_flags & MF_PAX_SEGMEXEC)?SEGMEXEC_TASK_SIZE:TASK_SIZE)
+#else
 #define STACK_TOP		TASK_SIZE
-#define STACK_TOP_MAX		STACK_TOP
+#endif
+
+#define STACK_TOP_MAX		TASK_SIZE
 
 #define INIT_THREAD  {							  \
 	.sp0			= TOP_OF_INIT_STACK,			  \
 	.sysenter_cs		= __KERNEL_CS,				  \
 	.io_bitmap_ptr		= NULL,					  \
+	.fpu._state		= &init_fpregs_state,			  \
 }
 
 extern unsigned long thread_saved_pc(struct task_struct *tsk);
@@ -729,12 +762,7 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
  * "struct pt_regs" is possible, but they may contain the
  * completely wrong values.
  */
-#define task_pt_regs(task) \
-({									\
-	unsigned long __ptr = (unsigned long)task_stack_page(task);	\
-	__ptr += THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;		\
-	((struct pt_regs *)__ptr) - 1;					\
-})
+#define task_pt_regs(tsk)	((struct pt_regs *)(tsk)->thread.sp0 - 1)
 
 #define KSTK_ESP(task)		(task_pt_regs(task)->sp)
 
@@ -748,13 +776,13 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
  * particular problem by preventing anything from being mapped
  * at the maximum canonical address.
  */
-#define TASK_SIZE_MAX	((1UL << 47) - PAGE_SIZE)
+#define TASK_SIZE_MAX	((1UL << TASK_SIZE_MAX_SHIFT) - PAGE_SIZE)
 
 /* This decides where the kernel will search for a free chunk of vm
  * space during mmap's.
  */
 #define IA32_PAGE_OFFSET	((current->personality & ADDR_LIMIT_3GB) ? \
-					0xc0000000 : 0xFFFFe000)
+					0xc0000000 : 0xFFFFf000)
 
 #define TASK_SIZE		(test_thread_flag(TIF_ADDR32) ? \
 					IA32_PAGE_OFFSET : TASK_SIZE_MAX)
@@ -765,7 +793,8 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
 #define STACK_TOP_MAX		TASK_SIZE_MAX
 
 #define INIT_THREAD  { \
-	.sp0 = TOP_OF_INIT_STACK \
+	.sp0 = TOP_OF_INIT_STACK, \
+	.fpu._state = &init_fpregs_state, \
 }
 
 /*
@@ -787,6 +816,10 @@ extern void start_thread(struct pt_regs *regs, unsigned long new_ip,
  * space during mmap's.
  */
 #define TASK_UNMAPPED_BASE	(PAGE_ALIGN(TASK_SIZE / 3))
+
+#ifdef CONFIG_PAX_SEGMEXEC
+#define SEGMEXEC_TASK_UNMAPPED_BASE	(PAGE_ALIGN(SEGMEXEC_TASK_SIZE / 3))
+#endif
 
 #define KSTK_EIP(task)		(task_pt_regs(task)->ip)
 
@@ -833,7 +866,7 @@ static inline uint32_t hypervisor_cpuid_base(const char *sig, uint32_t leaves)
 	return 0;
 }
 
-extern unsigned long arch_align_stack(unsigned long sp);
+#define arch_align_stack(x) ((x) & ~0xfUL)
 extern void free_init_pages(char *what, unsigned long begin, unsigned long end);
 
 void default_idle(void);
@@ -843,6 +876,18 @@ bool xen_set_default_idle(void);
 #define xen_set_default_idle 0
 #endif
 
-void stop_this_cpu(void *dummy);
+void stop_this_cpu(void *dummy) __noreturn;
 void df_debug(struct pt_regs *regs, long error_code);
+
+enum l1tf_mitigations {
+	L1TF_MITIGATION_OFF,
+	L1TF_MITIGATION_FLUSH_NOWARN,
+	L1TF_MITIGATION_FLUSH,
+	L1TF_MITIGATION_FLUSH_NOSMT,
+	L1TF_MITIGATION_FULL,
+	L1TF_MITIGATION_FULL_FORCE
+};
+
+extern enum l1tf_mitigations l1tf_mitigation;
+
 #endif /* _ASM_X86_PROCESSOR_H */

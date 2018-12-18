@@ -1789,7 +1789,7 @@ void amdgpu_debugfs_cleanup(struct drm_minor *minor);
  * amdgpu smumgr functions
  */
 struct amdgpu_smumgr_funcs {
-	int (*check_fw_load_finish)(struct amdgpu_device *adev, uint32_t fwtype);
+	int (*check_fw_load_finish)(struct amdgpu_device *adev, enum AMDGPU_UCODE_ID fwtype);
 	int (*request_smu_load_fw)(struct amdgpu_device *adev);
 	int (*request_smu_specific_fw)(struct amdgpu_device *adev, uint32_t fwtype);
 };
@@ -2340,7 +2340,7 @@ static inline void amdgpu_unregister_atpx_handler(void) {}
  * KMS
  */
 extern const struct drm_ioctl_desc amdgpu_ioctls_kms[];
-extern int amdgpu_max_kms_ioctl;
+extern const int amdgpu_max_kms_ioctl;
 
 int amdgpu_driver_load_kms(struct drm_device *dev, unsigned long flags);
 int amdgpu_driver_unload_kms(struct drm_device *dev);

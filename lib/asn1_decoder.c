@@ -206,7 +206,7 @@ next_op:
 	if (unlikely(pc >= machlen))
 		goto machine_overrun_error;
 	op = machine[pc];
-	if (unlikely(pc + asn1_op_lengths[op] > machlen))
+	if (unlikely(op >= ASN1_OP__NR || pc + asn1_op_lengths[op] > machlen))
 		goto machine_overrun_error;
 
 	/* If this command is meant to match a tag, then do that before

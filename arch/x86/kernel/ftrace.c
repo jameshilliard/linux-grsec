@@ -28,6 +28,7 @@
 #include <asm/kprobes.h>
 #include <asm/ftrace.h>
 #include <asm/nops.h>
+#include <asm/sections.h>
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 
@@ -89,7 +90,7 @@ static unsigned long text_ip_addr(unsigned long ip)
 	 * kernel identity mapping to modify code.
 	 */
 	if (within(ip, (unsigned long)_text, (unsigned long)_etext))
-		ip = (unsigned long)__va(__pa_symbol(ip));
+		ip = (unsigned long)__va(__pa_symbol(ktla_ktva(ip)));
 
 	return ip;
 }
@@ -104,6 +105,8 @@ ftrace_modify_code_direct(unsigned long ip, unsigned const char *old_code,
 		   unsigned const char *new_code)
 {
 	unsigned char replaced[MCOUNT_INSN_SIZE];
+
+	ip = ktla_ktva(ip);
 
 	/*
 	 * Note: Due to modules and __init, code can
@@ -230,7 +233,7 @@ static int update_ftrace_func(unsigned long ip, void *new)
 	unsigned char old[MCOUNT_INSN_SIZE];
 	int ret;
 
-	memcpy(old, (void *)ip, MCOUNT_INSN_SIZE);
+	memcpy(old, (void *)ktla_ktva(ip), MCOUNT_INSN_SIZE);
 
 	ftrace_update_func = ip;
 	/* Make sure the breakpoints see the ftrace_update_func update */
@@ -311,7 +314,7 @@ static int add_break(unsigned long ip, const char *old)
 	unsigned char replaced[MCOUNT_INSN_SIZE];
 	unsigned char brk = BREAKPOINT_INSTRUCTION;
 
-	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
+	if (probe_kernel_read(replaced, (void *)ktla_ktva(ip), MCOUNT_INSN_SIZE))
 		return -EFAULT;
 
 	/* Make sure it is what we expect it to be */
@@ -674,11 +677,11 @@ static unsigned char *ftrace_jmp_replace(unsigned long ip, unsigned long addr)
 /* Module allocation simplifies allocating memory for code */
 static inline void *alloc_tramp(unsigned long size)
 {
-	return module_alloc(size);
+	return module_alloc_exec(size);
 }
 static inline void tramp_free(void *tramp)
 {
-	module_memfree(tramp);
+	module_memfree_exec(tramp);
 }
 #else
 /* Trampolines can only be created if modules are supported */
@@ -757,7 +760,9 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 	*tramp_size = size + MCOUNT_INSN_SIZE + sizeof(void *);
 
 	/* Copy ftrace_caller onto the trampoline memory */
+	pax_open_kernel();
 	ret = probe_kernel_read(trampoline, (void *)start_offset, size);
+	pax_close_kernel();
 	if (WARN_ON(ret < 0)) {
 		tramp_free(trampoline);
 		return 0;
@@ -767,6 +772,7 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 
 	/* The trampoline ends with a jmp to ftrace_return */
 	jmp = ftrace_jmp_replace(ip, (unsigned long)ftrace_return);
+	pax_open_kernel();
 	memcpy(trampoline + size, jmp, MCOUNT_INSN_SIZE);
 
 	/*
@@ -779,6 +785,7 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 
 	ptr = (unsigned long *)(trampoline + size + MCOUNT_INSN_SIZE);
 	*ptr = (unsigned long)ops;
+	pax_close_kernel();
 
 	op_offset -= start_offset;
 	memcpy(&op_ptr, trampoline + op_offset, OP_REF_SIZE);
@@ -796,7 +803,9 @@ create_trampoline(struct ftrace_ops *ops, unsigned int *tramp_size)
 	op_ptr.offset = offset;
 
 	/* put in the new offset to the ftrace_ops */
+	pax_open_kernel();
 	memcpy(trampoline + op_offset, &op_ptr, OP_REF_SIZE);
+	pax_close_kernel();
 
 	/* ALLOC_TRAMP flags lets us know we created it */
 	ops->flags |= FTRACE_OPS_FL_ALLOC_TRAMP;

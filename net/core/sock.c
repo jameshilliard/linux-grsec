@@ -137,10 +137,7 @@
 
 #include <trace/events/sock.h>
 
-#ifdef CONFIG_INET
 #include <net/tcp.h>
-#endif
-
 #include <net/busy_poll.h>
 
 static DEFINE_MUTEX(proto_list_mutex);
@@ -444,24 +441,19 @@ static void sock_disable_timestamp(struct sock *sk, unsigned long flags)
 }
 
 
-int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
+int __sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
-	int err;
 	unsigned long flags;
 	struct sk_buff_head *list = &sk->sk_receive_queue;
 
 	if (atomic_read(&sk->sk_rmem_alloc) >= sk->sk_rcvbuf) {
-		atomic_inc(&sk->sk_drops);
+		atomic_inc_unchecked(&sk->sk_drops);
 		trace_sock_rcvqueue_full(sk, skb);
 		return -ENOMEM;
 	}
 
-	err = sk_filter(sk, skb);
-	if (err)
-		return err;
-
 	if (!sk_rmem_schedule(sk, skb, skb->truesize)) {
-		atomic_inc(&sk->sk_drops);
+		atomic_inc_unchecked(&sk->sk_drops);
 		return -ENOBUFS;
 	}
 
@@ -482,6 +474,18 @@ int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 		sk->sk_data_ready(sk);
 	return 0;
 }
+EXPORT_SYMBOL(__sock_queue_rcv_skb);
+
+int sock_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
+{
+	int err;
+
+	err = sk_filter(sk, skb);
+	if (err)
+		return err;
+
+	return __sock_queue_rcv_skb(sk, skb);
+}
 EXPORT_SYMBOL(sock_queue_rcv_skb);
 
 int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
@@ -494,7 +498,7 @@ int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
 	skb->dev = NULL;
 
 	if (sk_rcvqueues_full(sk, sk->sk_rcvbuf)) {
-		atomic_inc(&sk->sk_drops);
+		atomic_inc_unchecked(&sk->sk_drops);
 		goto discard_and_relse;
 	}
 	if (nested)
@@ -512,7 +516,7 @@ int sk_receive_skb(struct sock *sk, struct sk_buff *skb, const int nested)
 		mutex_release(&sk->sk_lock.dep_map, 1, _RET_IP_);
 	} else if (sk_add_backlog(sk, skb, sk->sk_rcvbuf)) {
 		bh_unlock_sock(sk);
-		atomic_inc(&sk->sk_drops);
+		atomic_inc_unchecked(&sk->sk_drops);
 		goto discard_and_relse;
 	}
 
@@ -919,6 +923,7 @@ set_rcvbuf:
 		}
 		break;
 
+#ifndef GRKERNSEC_BPF_HARDEN
 	case SO_ATTACH_BPF:
 		ret = -EINVAL;
 		if (optlen == sizeof(u32)) {
@@ -931,7 +936,7 @@ set_rcvbuf:
 			ret = sk_attach_bpf(ufd, sk);
 		}
 		break;
-
+#endif
 	case SO_DETACH_FILTER:
 		ret = sk_detach_filter(sk);
 		break;
@@ -1037,12 +1042,12 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 		struct timeval tm;
 	} v;
 
-	int lv = sizeof(int);
-	int len;
+	unsigned int lv = sizeof(int);
+	unsigned int len;
 
 	if (get_user(len, optlen))
 		return -EFAULT;
-	if (len < 0)
+	if (len > INT_MAX)
 		return -EINVAL;
 
 	memset(&v, 0, sizeof(v));
@@ -1180,11 +1185,11 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 
 	case SO_PEERNAME:
 	{
-		char address[128];
+		char address[_K_SS_MAXSIZE];
 
 		if (sock->ops->getname(sock, (struct sockaddr *)address, &lv, 2))
 			return -ENOTCONN;
-		if (lv < len)
+		if (lv < len || sizeof address < len)
 			return -EINVAL;
 		if (copy_to_user(optval, address, len))
 			return -EFAULT;
@@ -1272,7 +1277,7 @@ int sock_getsockopt(struct socket *sock, int level, int optname,
 
 	if (len > lv)
 		len = lv;
-	if (copy_to_user(optval, &v, len))
+	if (len > sizeof(v) || copy_to_user(optval, &v, len))
 		return -EFAULT;
 lenout:
 	if (put_user(len, optlen))
@@ -1565,11 +1570,7 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 			 */
 			if (!is_charged)
 				RCU_INIT_POINTER(newsk->sk_filter, NULL);
-			/* It is still raw copy of parent, so invalidate
-			 * destructor and make plain sk_free() */
-			newsk->sk_destruct = NULL;
-			bh_unlock_sock(newsk);
-			sk_free(newsk);
+			sk_free_unlock_clone(newsk);
 			newsk = NULL;
 			goto out;
 		}
@@ -1578,7 +1579,7 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 		newsk->sk_err_soft = 0;
 		newsk->sk_priority = 0;
 		newsk->sk_incoming_cpu = raw_smp_processor_id();
-		atomic64_set(&newsk->sk_cookie, 0);
+		atomic64_set_unchecked(&newsk->sk_cookie, 0);
 		/*
 		 * Before updating sk_refcnt, we must commit prior changes to memory
 		 * (Documentation/RCU/rculist_nulls.txt for details)
@@ -1614,6 +1615,16 @@ out:
 	return newsk;
 }
 EXPORT_SYMBOL_GPL(sk_clone_lock);
+
+void sk_free_unlock_clone(struct sock *sk)
+{
+	/* It is still raw copy of parent, so invalidate
+	 * destructor and make plain sk_free() */
+	sk->sk_destruct = NULL;
+	bh_unlock_sock(sk);
+	sk_free(sk);
+}
+EXPORT_SYMBOL_GPL(sk_free_unlock_clone);
 
 void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 {
@@ -2295,7 +2306,7 @@ static void sock_def_wakeup(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (wq_has_sleeper(wq))
+	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_all(&wq->wait);
 	rcu_read_unlock();
 }
@@ -2306,7 +2317,7 @@ static void sock_def_error_report(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (wq_has_sleeper(wq))
+	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_poll(&wq->wait, POLLERR);
 	sk_wake_async(sk, SOCK_WAKE_IO, POLL_ERR);
 	rcu_read_unlock();
@@ -2318,7 +2329,7 @@ static void sock_def_readable(struct sock *sk)
 
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
-	if (wq_has_sleeper(wq))
+	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_sync_poll(&wq->wait, POLLIN | POLLPRI |
 						POLLRDNORM | POLLRDBAND);
 	sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_IN);
@@ -2336,7 +2347,7 @@ static void sock_def_write_space(struct sock *sk)
 	 */
 	if ((atomic_read(&sk->sk_wmem_alloc) << 1) <= sk->sk_sndbuf) {
 		wq = rcu_dereference(sk->sk_wq);
-		if (wq_has_sleeper(wq))
+		if (skwq_has_sleeper(wq))
 			wake_up_interruptible_sync_poll(&wq->wait, POLLOUT |
 						POLLWRNORM | POLLWRBAND);
 
@@ -2438,7 +2449,7 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	 */
 	smp_wmb();
 	atomic_set(&sk->sk_refcnt, 1);
-	atomic_set(&sk->sk_drops, 0);
+	atomic_set_unchecked(&sk->sk_drops, 0);
 }
 EXPORT_SYMBOL(sock_init_data);
 
@@ -2567,6 +2578,7 @@ void sock_enable_timestamp(struct sock *sk, int flag)
 int sock_recv_errqueue(struct sock *sk, struct msghdr *msg, int len,
 		       int level, int type)
 {
+	struct sock_extended_err ee;
 	struct sock_exterr_skb *serr;
 	struct sk_buff *skb;
 	int copied, err;
@@ -2588,7 +2600,8 @@ int sock_recv_errqueue(struct sock *sk, struct msghdr *msg, int len,
 	sock_recv_timestamp(msg, sk, skb);
 
 	serr = SKB_EXT_ERR(skb);
-	put_cmsg(msg, level, type, sizeof(serr->ee), &serr->ee);
+	ee = serr->ee;
+	put_cmsg(msg, level, type, sizeof ee, &ee);
 
 	msg->msg_flags |= MSG_ERRQUEUE;
 	err = copied;
@@ -2846,8 +2859,9 @@ static int req_prot_init(const struct proto *prot)
 int proto_register(struct proto *prot, int alloc_slab)
 {
 	if (alloc_slab) {
-		prot->slab = kmem_cache_create(prot->name, prot->obj_size, 0,
+		prot->slab = kmem_cache_create_usercopy(prot->name, prot->obj_size, 0,
 					SLAB_HWCACHE_ALIGN | prot->slab_flags,
+					prot->useroffset, prot->usersize,
 					NULL);
 
 		if (prot->slab == NULL) {
@@ -2913,6 +2927,27 @@ void proto_unregister(struct proto *prot)
 	}
 }
 EXPORT_SYMBOL(proto_unregister);
+
+int sock_load_diag_module(int family, int protocol)
+{
+	if (!protocol) {
+		if (!sock_is_registered(family))
+			return -ENOENT;
+
+		return request_module("net-pf-%d-proto-%d-type-%d", PF_NETLINK,
+				      NETLINK_SOCK_DIAG, family);
+	}
+
+#ifdef CONFIG_INET
+	if (family == AF_INET &&
+	    !rcu_access_pointer(inet_protos[protocol]))
+		return -ENOENT;
+#endif
+
+	return request_module("net-pf-%d-proto-%d-type-%d-%d", PF_NETLINK,
+			      NETLINK_SOCK_DIAG, family, protocol);
+}
+EXPORT_SYMBOL(sock_load_diag_module);
 
 #ifdef CONFIG_PROC_FS
 static void *proto_seq_start(struct seq_file *seq, loff_t *pos)
@@ -3035,7 +3070,7 @@ static __net_exit void proto_exit_net(struct net *net)
 }
 
 
-static __net_initdata struct pernet_operations proto_net_ops = {
+static __net_initconst struct pernet_operations proto_net_ops = {
 	.init = proto_init_net,
 	.exit = proto_exit_net,
 };

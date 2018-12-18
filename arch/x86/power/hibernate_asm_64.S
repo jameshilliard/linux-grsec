@@ -21,6 +21,7 @@
 #include <asm/page_types.h>
 #include <asm/asm-offsets.h>
 #include <asm/processor-flags.h>
+#include <asm/smap.h>
 
 ENTRY(swsusp_arch_suspend)
 	movq	$saved_context, %rax
@@ -138,6 +139,7 @@ ENTRY(restore_registers)
 	movq	pt_regs_r15(%rax), %r15
 	pushq	pt_regs_flags(%rax)
 	popfq
+	ASM_CLAC
 
 	/* Saved in save_processor_state. */
 	lgdt	saved_context_gdt_desc(%rax)

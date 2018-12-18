@@ -437,7 +437,7 @@ static int put_v4l2_plane32(struct v4l2_plane __user *up,
 		break;
 	case V4L2_MEMORY_USERPTR:
 		if (get_user(p, &up->m.userptr) ||
-		    put_user((compat_ulong_t)ptr_to_compat((__force void *)p),
+		    put_user((compat_ulong_t)ptr_to_compat((__force_kernel void *)p),
 			     &up32->m.userptr))
 			return -EFAULT;
 		break;
@@ -536,7 +536,7 @@ static int get_v4l2_buffer32(struct v4l2_buffer __user *kp,
 			return -EFAULT;
 
 		uplane = aux_buf;
-		if (put_user((__force struct v4l2_plane *)uplane,
+		if (put_user((__force_kernel struct v4l2_plane *)uplane,
 			     &kp->m.planes))
 			return -EFAULT;
 
@@ -611,7 +611,7 @@ static int put_v4l2_buffer32(struct v4l2_buffer __user *kp,
 		if (num_planes == 0)
 			return 0;
 
-		if (get_user(uplane, ((__force struct v4l2_plane __user **)&kp->m.planes)))
+		if (get_user(uplane, ((__force_user struct v4l2_plane __user **)&kp->m.planes)))
 			return -EFAULT;
 		if (get_user(p, &up->m.planes))
 			return -EFAULT;
@@ -668,7 +668,7 @@ static int get_v4l2_framebuffer32(struct v4l2_framebuffer __user *kp,
 
 	if (!access_ok(VERIFY_READ, up, sizeof(*up)) ||
 	    get_user(tmp, &up->base) ||
-	    put_user((__force void *)compat_ptr(tmp), &kp->base) ||
+	    put_user((__force_kernel void *)compat_ptr(tmp), &kp->base) ||
 	    assign_in_user(&kp->capability, &up->capability) ||
 	    assign_in_user(&kp->flags, &up->flags) ||
 	    copy_in_user(&kp->fmt, &up->fmt, sizeof(kp->fmt)))
@@ -817,7 +817,7 @@ static int get_v4l2_ext_controls32(struct file *file,
 	if (aux_space < count * sizeof(*kcontrols))
 		return -EFAULT;
 	kcontrols = aux_buf;
-	if (put_user((__force struct v4l2_ext_control *)kcontrols,
+	if (put_user((__force_kernel struct v4l2_ext_control *)kcontrols,
 		     &kp->controls))
 		return -EFAULT;
 

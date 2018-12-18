@@ -270,7 +270,7 @@ struct mips_cdmm_bus {
 
 static struct mips_cdmm_bus mips_cdmm_boot_bus;
 static DEFINE_PER_CPU(struct mips_cdmm_bus *, mips_cdmm_buses);
-static atomic_t mips_cdmm_next_id = ATOMIC_INIT(-1);
+static atomic_unchecked_t mips_cdmm_next_id = ATOMIC_INIT(-1);
 
 /**
  * mips_cdmm_get_bus() - Get the per-CPU CDMM bus information.
@@ -538,7 +538,7 @@ static void mips_cdmm_bus_discover(struct mips_cdmm_bus *bus)
 		dev->rev = rev;
 		dev->dev.parent = get_cpu_device(cpu);
 		dev->dev.bus = &mips_cdmm_bustype;
-		dev->dev.id = atomic_inc_return(&mips_cdmm_next_id);
+		dev->dev.id = atomic_inc_return_unchecked(&mips_cdmm_next_id);
 		dev->dev.release = mips_cdmm_release;
 
 		dev_set_name(&dev->dev, "cdmm%u-%u", cpu, id);

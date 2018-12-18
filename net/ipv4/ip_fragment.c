@@ -293,7 +293,7 @@ static int ip_frag_too_far(struct ipq *qp)
 		return 0;
 
 	start = qp->rid;
-	end = atomic_inc_return(&peer->rid);
+	end = atomic_inc_return_unchecked(&peer->rid);
 	qp->rid = end;
 
 	rc = qp->q.fragments && (end - start) > max;
@@ -784,12 +784,11 @@ static struct ctl_table ip4_frags_ctl_table[] = {
 
 static int __net_init ip4_frags_ns_ctl_register(struct net *net)
 {
-	struct ctl_table *table;
+	ctl_table_no_const *table = NULL;
 	struct ctl_table_header *hdr;
 
-	table = ip4_frags_ns_ctl_table;
 	if (!net_eq(net, &init_net)) {
-		table = kmemdup(table, sizeof(ip4_frags_ns_ctl_table), GFP_KERNEL);
+		table = kmemdup(ip4_frags_ns_ctl_table, sizeof(ip4_frags_ns_ctl_table), GFP_KERNEL);
 		if (!table)
 			goto err_alloc;
 
@@ -803,9 +802,10 @@ static int __net_init ip4_frags_ns_ctl_register(struct net *net)
 		/* Don't export sysctls to unprivileged users */
 		if (net->user_ns != &init_user_ns)
 			table[0].procname = NULL;
-	}
+		hdr = register_net_sysctl(net, "net/ipv4", table);
+	} else
+		hdr = register_net_sysctl(net, "net/ipv4", ip4_frags_ns_ctl_table);
 
-	hdr = register_net_sysctl(net, "net/ipv4", table);
 	if (!hdr)
 		goto err_reg;
 
@@ -813,8 +813,7 @@ static int __net_init ip4_frags_ns_ctl_register(struct net *net)
 	return 0;
 
 err_reg:
-	if (!net_eq(net, &init_net))
-		kfree(table);
+	kfree(table);
 err_alloc:
 	return -ENOMEM;
 }
@@ -849,22 +848,14 @@ static void __init ip4_frags_ctl_register(void)
 
 static int __net_init ipv4_frags_init_net(struct net *net)
 {
-	/* Fragment cache limits.
-	 *
-	 * The fragment memory accounting code, (tries to) account for
-	 * the real memory usage, by measuring both the size of frag
-	 * queue struct (inet_frag_queue (ipv4:ipq/ipv6:frag_queue))
-	 * and the SKB's truesize.
-	 *
-	 * A 64K fragment consumes 129736 bytes (44*2944)+200
-	 * (1500 truesize == 2944, sizeof(struct ipq) == 200)
-	 *
-	 * We will commit 4MB at one time. Should we cross that limit
-	 * we will prune down to 3MB, making room for approx 8 big 64K
-	 * fragments 8x128k.
+	/*
+	 * Fragment cache limits. We will commit 256K at one time. Should we
+	 * cross that limit we will prune down to 192K. This should cope with
+	 * even the most extreme cases without allowing an attacker to
+	 * measurably harm machine performance.
 	 */
-	net->ipv4.frags.high_thresh = 4 * 1024 * 1024;
-	net->ipv4.frags.low_thresh  = 3 * 1024 * 1024;
+	net->ipv4.frags.high_thresh = 256 * 1024;
+	net->ipv4.frags.low_thresh = 192 * 1024;
 	/*
 	 * Important NOTE! Fragment queue must be destroyed before MSL expires.
 	 * RFC791 is wrong proposing to prolongate timer each fragment arrival

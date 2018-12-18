@@ -35,7 +35,7 @@ static void *get_uts(struct ctl_table *table)
 static int proc_do_uts_string(struct ctl_table *table, int write,
 		  void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct ctl_table uts_table;
+	ctl_table_no_const uts_table;
 	int r;
 	char tmp_data[__NEW_UTS_LEN + 1];
 

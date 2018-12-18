@@ -417,7 +417,7 @@ static ssize_t snd_seq_read(struct file *file, char __user *buf, size_t count,
 	if (!client->accept_input || (fifo = client->data.user.fifo) == NULL)
 		return -ENXIO;
 
-	if (atomic_read(&fifo->overflow) > 0) {
+	if (atomic_read_unchecked(&fifo->overflow) > 0) {
 		/* buffer overflow is detected */
 		snd_seq_fifo_clear(fifo);
 		/* return error code */
@@ -447,7 +447,7 @@ static ssize_t snd_seq_read(struct file *file, char __user *buf, size_t count,
 			count -= sizeof(struct snd_seq_event);
 			buf += sizeof(struct snd_seq_event);
 			err = snd_seq_expand_var_event(&cell->event, count,
-						       (char __force *)buf, 0,
+						       (char __force_kernel *)buf, 0,
 						       sizeof(struct snd_seq_event));
 			if (err < 0)
 				break;
@@ -1068,13 +1068,13 @@ static ssize_t snd_seq_write(struct file *file, const char __user *buf,
 			}
 			/* set user space pointer */
 			event.data.ext.len = extlen | SNDRV_SEQ_EXT_USRPTR;
-			event.data.ext.ptr = (char __force *)buf
+			event.data.ext.ptr = (char __force_kernel *)buf
 						+ sizeof(struct snd_seq_event);
 			len += extlen; /* increment data length */
 		} else {
 #ifdef CONFIG_COMPAT
 			if (client->convert32 && snd_seq_ev_is_varusr(&event)) {
-				void *ptr = (void __force *)compat_ptr(event.data.raw32.d[1]);
+				void *ptr = (void __force_kernel *)compat_ptr(event.data.raw32.d[1]);
 				event.data.ext.ptr = ptr;
 			}
 #endif
@@ -2110,7 +2110,8 @@ static int snd_seq_ioctl_query_next_client(struct snd_seq_client *client,
 		return -EFAULT;
 
 	/* search for next client */
-	info.client++;
+	if (info.client < INT_MAX)
+		info.client++;
 	if (info.client < 0)
 		info.client = 0;
 	for (; info.client < SNDRV_SEQ_MAX_CLIENTS; info.client++) {
@@ -2226,7 +2227,6 @@ static int snd_seq_do_ioctl(struct snd_seq_client *client, unsigned int cmd,
 		   cmd, _IOC_TYPE(cmd), _IOC_NR(cmd));
 	return -ENOTTY;
 }
-
 
 static long snd_seq_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -2439,7 +2439,7 @@ int snd_seq_kernel_client_ctl(int clientid, unsigned int cmd, void *arg)
 	if (client == NULL)
 		return -ENXIO;
 	fs = snd_enter_user();
-	result = snd_seq_do_ioctl(client, cmd, (void __force __user *)arg);
+	result = snd_seq_do_ioctl(client, cmd, (void __force_user *)arg);
 	snd_leave_user(fs);
 	return result;
 }

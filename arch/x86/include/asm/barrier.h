@@ -3,6 +3,7 @@
 
 #include <asm/alternative.h>
 #include <asm/nops.h>
+#include <asm/cpufeatures.h>
 
 /*
  * Force strict CPU ordering.
@@ -33,14 +34,17 @@
  * Returns:
  *     0 - (index < size)
  */
-static inline unsigned long array_index_mask_nospec(unsigned long index,
+static __always_inline unsigned long array_index_mask_nospec(unsigned long index,
 		unsigned long size)
 {
 	unsigned long mask;
 
+	if (__builtin_constant_p(index))
+		return ~0UL;
+
 	asm volatile ("cmp %1,%2; sbb %0,%0;"
 			:"=r" (mask)
-			:"g"(size),"r" (index)
+			:"erm"(size),"r" (index)
 			:"cc");
 	return mask;
 }
@@ -49,8 +53,10 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
 #define array_index_mask_nospec array_index_mask_nospec
 
 /* Prevent speculative execution past this barrier. */
-#define barrier_nospec() alternative_2("", "mfence", X86_FEATURE_MFENCE_RDTSC, \
-					   "lfence", X86_FEATURE_LFENCE_RDTSC)
+static __always_inline void barrier_nospec(void)
+{
+	alternative_2("", "mfence", X86_FEATURE_MFENCE_RDTSC, "lfence", X86_FEATURE_LFENCE_RDTSC);
+}
 
 #ifdef CONFIG_X86_PPRO_FENCE
 #define dma_rmb()	rmb()

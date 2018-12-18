@@ -27,6 +27,19 @@ static inline void paravirt_release_pud(unsigned long pfn) {}
  */
 extern gfp_t __userpte_alloc_gfp;
 
+#ifdef CONFIG_PAX_PER_CPU_PGD
+#define PGD_ALLOCATION_ORDER 2
+#elif defined(CONFIG_PAGE_TABLE_ISOLATION)
+/*
+ * Instead of one pgd, Kaiser acquires two pgds.  Being order-1, it is
+ * both 8k in size and 8k-aligned.  That lets us just flip bit 12
+ * in a pointer to swap between the two 4k halves.
+ */
+#define PGD_ALLOCATION_ORDER 1
+#else
+#define PGD_ALLOCATION_ORDER 0
+#endif
+
 /*
  * Allocate and free page tables.
  */
@@ -60,6 +73,13 @@ static inline void __pte_free_tlb(struct mmu_gather *tlb, struct page *pte,
 }
 
 static inline void pmd_populate_kernel(struct mm_struct *mm,
+				       pmd_t *pmd, pte_t *pte)
+{
+	paravirt_alloc_pte(mm, __pa(pte) >> PAGE_SHIFT);
+	set_pmd(pmd, __pmd(__pa(pte) | _KERNPG_TABLE));
+}
+
+static inline void pmd_populate_user(struct mm_struct *mm,
 				       pmd_t *pmd, pte_t *pte)
 {
 	paravirt_alloc_pte(mm, __pa(pte) >> PAGE_SHIFT);
@@ -108,11 +128,21 @@ static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 
 #ifdef CONFIG_X86_PAE
 extern void pud_populate(struct mm_struct *mm, pud_t *pudp, pmd_t *pmd);
+static inline void pud_populate_kernel(struct mm_struct *mm, pud_t *pudp, pmd_t *pmd)
+{
+	pud_populate(mm, pudp, pmd);
+}
 #else	/* !CONFIG_X86_PAE */
 static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 {
 	paravirt_alloc_pmd(mm, __pa(pmd) >> PAGE_SHIFT);
 	set_pud(pud, __pud(_PAGE_TABLE | __pa(pmd)));
+}
+
+static inline void pud_populate_kernel(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
+{
+	paravirt_alloc_pmd(mm, __pa(pmd) >> PAGE_SHIFT);
+	set_pud(pud, __pud(_KERNPG_TABLE | __pa(pmd)));
 }
 #endif	/* CONFIG_X86_PAE */
 
@@ -121,6 +151,12 @@ static inline void pgd_populate(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
 {
 	paravirt_alloc_pud(mm, __pa(pud) >> PAGE_SHIFT);
 	set_pgd(pgd, __pgd(_PAGE_TABLE | __pa(pud)));
+}
+
+static inline void pgd_populate_kernel(struct mm_struct *mm, pgd_t *pgd, pud_t *pud)
+{
+	paravirt_alloc_pud(mm, __pa(pud) >> PAGE_SHIFT);
+	set_pgd(pgd, __pgd(_KERNPG_TABLE | __pa(pud)));
 }
 
 static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)

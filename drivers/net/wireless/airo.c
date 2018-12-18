@@ -4779,7 +4779,7 @@ static int get_dec_u16( char *buffer, int *start, int limit ) {
 }
 
 static int airo_config_commit(struct net_device *dev,
-			      struct iw_request_info *info, void *zwrq,
+			      struct iw_request_info *info, union iwreq_data *zwrq,
 			      char *extra);
 
 static inline int sniffing_mode(struct airo_info *ai)
@@ -5778,9 +5778,11 @@ static int airo_get_quality (StatusRid *status_rid, CapabilityRid *cap_rid)
  */
 static int airo_get_name(struct net_device *dev,
 			 struct iw_request_info *info,
-			 char *cwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	char *cwrq = wrqu->name;
+
 	strcpy(cwrq, "IEEE 802.11-DS");
 	return 0;
 }
@@ -5791,9 +5793,10 @@ static int airo_get_name(struct net_device *dev,
  */
 static int airo_set_freq(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_freq *fwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_freq *fwrq = &wrqu->freq;
 	struct airo_info *local = dev->ml_priv;
 	int rc = -EINPROGRESS;		/* Call commit handler */
 
@@ -5832,9 +5835,10 @@ static int airo_set_freq(struct net_device *dev,
  */
 static int airo_get_freq(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_freq *fwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_freq *fwrq = &wrqu->freq;
 	struct airo_info *local = dev->ml_priv;
 	StatusRid status_rid;		/* Card status info */
 	int ch;
@@ -5864,9 +5868,10 @@ static int airo_get_freq(struct net_device *dev,
  */
 static int airo_set_essid(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_point *dwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_point *dwrq = &wrqu->essid;
 	struct airo_info *local = dev->ml_priv;
 	SsidRid SSID_rid;		/* SSIDs */
 
@@ -5909,9 +5914,10 @@ static int airo_set_essid(struct net_device *dev,
  */
 static int airo_get_essid(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_point *dwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_point *dwrq = &wrqu->essid;
 	struct airo_info *local = dev->ml_priv;
 	StatusRid status_rid;		/* Card status info */
 
@@ -5937,9 +5943,10 @@ static int airo_get_essid(struct net_device *dev,
  */
 static int airo_set_wap(struct net_device *dev,
 			struct iw_request_info *info,
-			struct sockaddr *awrq,
+			union iwreq_data *wrqu,
 			char *extra)
 {
+	struct sockaddr *awrq = &wrqu->ap_addr;
 	struct airo_info *local = dev->ml_priv;
 	Cmd cmd;
 	Resp rsp;
@@ -5972,9 +5979,10 @@ static int airo_set_wap(struct net_device *dev,
  */
 static int airo_get_wap(struct net_device *dev,
 			struct iw_request_info *info,
-			struct sockaddr *awrq,
+			union iwreq_data *wrqu,
 			char *extra)
 {
+	struct sockaddr *awrq = &wrqu->ap_addr;
 	struct airo_info *local = dev->ml_priv;
 	StatusRid status_rid;		/* Card status info */
 
@@ -5993,9 +6001,10 @@ static int airo_get_wap(struct net_device *dev,
  */
 static int airo_set_nick(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_point *dwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct airo_info *local = dev->ml_priv;
 
 	/* Check the size of the string */
@@ -6016,9 +6025,10 @@ static int airo_set_nick(struct net_device *dev,
  */
 static int airo_get_nick(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_point *dwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -6035,9 +6045,10 @@ static int airo_get_nick(struct net_device *dev,
  */
 static int airo_set_rate(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->bitrate;
 	struct airo_info *local = dev->ml_priv;
 	CapabilityRid cap_rid;		/* Card capability info */
 	u8	brate = 0;
@@ -6105,9 +6116,10 @@ static int airo_set_rate(struct net_device *dev,
  */
 static int airo_get_rate(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->bitrate;
 	struct airo_info *local = dev->ml_priv;
 	StatusRid status_rid;		/* Card status info */
 
@@ -6127,9 +6139,10 @@ static int airo_get_rate(struct net_device *dev,
  */
 static int airo_set_rts(struct net_device *dev,
 			struct iw_request_info *info,
-			struct iw_param *vwrq,
+			union iwreq_data *wrqu,
 			char *extra)
 {
+	struct iw_param *vwrq = &wrqu->rts;
 	struct airo_info *local = dev->ml_priv;
 	int rthr = vwrq->value;
 
@@ -6151,9 +6164,10 @@ static int airo_set_rts(struct net_device *dev,
  */
 static int airo_get_rts(struct net_device *dev,
 			struct iw_request_info *info,
-			struct iw_param *vwrq,
+			union iwreq_data *wrqu,
 			char *extra)
 {
+	struct iw_param *vwrq = &wrqu->rts;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -6170,9 +6184,10 @@ static int airo_get_rts(struct net_device *dev,
  */
 static int airo_set_frag(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->frag;
 	struct airo_info *local = dev->ml_priv;
 	int fthr = vwrq->value;
 
@@ -6195,9 +6210,10 @@ static int airo_set_frag(struct net_device *dev,
  */
 static int airo_get_frag(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->frag;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -6214,9 +6230,10 @@ static int airo_get_frag(struct net_device *dev,
  */
 static int airo_set_mode(struct net_device *dev,
 			 struct iw_request_info *info,
-			 __u32 *uwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	__u32 *uwrq = &wrqu->mode;
 	struct airo_info *local = dev->ml_priv;
 	int reset = 0;
 
@@ -6277,9 +6294,10 @@ static int airo_set_mode(struct net_device *dev,
  */
 static int airo_get_mode(struct net_device *dev,
 			 struct iw_request_info *info,
-			 __u32 *uwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	__u32 *uwrq = &wrqu->mode;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -6312,9 +6330,10 @@ static inline int valid_index(struct airo_info *ai, int index)
  */
 static int airo_set_encode(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *dwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_point *dwrq = &wrqu->encoding;
 	struct airo_info *local = dev->ml_priv;
 	int perm = (dwrq->flags & IW_ENCODE_TEMP ? 0 : 1);
 	__le16 currentAuthType = local->config.authType;
@@ -6411,9 +6430,10 @@ static int airo_set_encode(struct net_device *dev,
  */
 static int airo_get_encode(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *dwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_point *dwrq = &wrqu->encoding;
 	struct airo_info *local = dev->ml_priv;
 	int index = (dwrq->flags & IW_ENCODE_INDEX) - 1;
 	int wep_key_len;
@@ -6758,9 +6778,10 @@ static int airo_get_auth(struct net_device *dev,
  */
 static int airo_set_txpow(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->txpower;
 	struct airo_info *local = dev->ml_priv;
 	CapabilityRid cap_rid;		/* Card capability info */
 	int i;
@@ -6795,9 +6816,10 @@ static int airo_set_txpow(struct net_device *dev,
  */
 static int airo_get_txpow(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->txpower;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -6815,9 +6837,10 @@ static int airo_get_txpow(struct net_device *dev,
  */
 static int airo_set_retry(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->retry;
 	struct airo_info *local = dev->ml_priv;
 	int rc = -EINVAL;
 
@@ -6853,9 +6876,10 @@ static int airo_set_retry(struct net_device *dev,
  */
 static int airo_get_retry(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->retry;
 	struct airo_info *local = dev->ml_priv;
 
 	vwrq->disabled = 0;      /* Can't be disabled */
@@ -6884,9 +6908,10 @@ static int airo_get_retry(struct net_device *dev,
  */
 static int airo_get_range(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_point *dwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct airo_info *local = dev->ml_priv;
 	struct iw_range *range = (struct iw_range *) extra;
 	CapabilityRid cap_rid;		/* Card capability info */
@@ -7010,9 +7035,10 @@ static int airo_get_range(struct net_device *dev,
  */
 static int airo_set_power(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->power;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -7067,9 +7093,10 @@ static int airo_set_power(struct net_device *dev,
  */
 static int airo_get_power(struct net_device *dev,
 			  struct iw_request_info *info,
-			  struct iw_param *vwrq,
+			  union iwreq_data *wrqu,
 			  char *extra)
 {
+	struct iw_param *vwrq = &wrqu->power;
 	struct airo_info *local = dev->ml_priv;
 	__le16 mode;
 
@@ -7098,9 +7125,10 @@ static int airo_get_power(struct net_device *dev,
  */
 static int airo_set_sens(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->sens;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -7117,9 +7145,10 @@ static int airo_set_sens(struct net_device *dev,
  */
 static int airo_get_sens(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_param *vwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_param *vwrq = &wrqu->sens;
 	struct airo_info *local = dev->ml_priv;
 
 	readConfigRid(local, 1);
@@ -7137,9 +7166,10 @@ static int airo_get_sens(struct net_device *dev,
  */
 static int airo_get_aplist(struct net_device *dev,
 			   struct iw_request_info *info,
-			   struct iw_point *dwrq,
+			   union iwreq_data *wrqu,
 			   char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct airo_info *local = dev->ml_priv;
 	struct sockaddr *address = (struct sockaddr *) extra;
 	struct iw_quality *qual;
@@ -7215,7 +7245,7 @@ static int airo_get_aplist(struct net_device *dev,
  */
 static int airo_set_scan(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_point *dwrq,
+			 union iwreq_data *dwrq,
 			 char *extra)
 {
 	struct airo_info *ai = dev->ml_priv;
@@ -7446,9 +7476,10 @@ static inline char *airo_translate_scan(struct net_device *dev,
  */
 static int airo_get_scan(struct net_device *dev,
 			 struct iw_request_info *info,
-			 struct iw_point *dwrq,
+			 union iwreq_data *wrqu,
 			 char *extra)
 {
+	struct iw_point *dwrq = &wrqu->data;
 	struct airo_info *ai = dev->ml_priv;
 	BSSListElement *net;
 	int err = 0;
@@ -7490,7 +7521,7 @@ out:
  */
 static int airo_config_commit(struct net_device *dev,
 			      struct iw_request_info *info,	/* NULL */
-			      void *zwrq,			/* NULL */
+			      union iwreq_data *zwrq,		/* NULL */
 			      char *extra)			/* NULL */
 {
 	struct airo_info *local = dev->ml_priv;
@@ -7540,61 +7571,61 @@ static const struct iw_priv_args airo_private_args[] = {
 
 static const iw_handler		airo_handler[] =
 {
-	(iw_handler) airo_config_commit,	/* SIOCSIWCOMMIT */
-	(iw_handler) airo_get_name,		/* SIOCGIWNAME */
-	(iw_handler) NULL,			/* SIOCSIWNWID */
-	(iw_handler) NULL,			/* SIOCGIWNWID */
-	(iw_handler) airo_set_freq,		/* SIOCSIWFREQ */
-	(iw_handler) airo_get_freq,		/* SIOCGIWFREQ */
-	(iw_handler) airo_set_mode,		/* SIOCSIWMODE */
-	(iw_handler) airo_get_mode,		/* SIOCGIWMODE */
-	(iw_handler) airo_set_sens,		/* SIOCSIWSENS */
-	(iw_handler) airo_get_sens,		/* SIOCGIWSENS */
-	(iw_handler) NULL,			/* SIOCSIWRANGE */
-	(iw_handler) airo_get_range,		/* SIOCGIWRANGE */
-	(iw_handler) NULL,			/* SIOCSIWPRIV */
-	(iw_handler) NULL,			/* SIOCGIWPRIV */
-	(iw_handler) NULL,			/* SIOCSIWSTATS */
-	(iw_handler) NULL,			/* SIOCGIWSTATS */
+	airo_config_commit,	/* SIOCSIWCOMMIT */
+	airo_get_name,		/* SIOCGIWNAME */
+	NULL,			/* SIOCSIWNWID */
+	NULL,			/* SIOCGIWNWID */
+	airo_set_freq,		/* SIOCSIWFREQ */
+	airo_get_freq,		/* SIOCGIWFREQ */
+	airo_set_mode,		/* SIOCSIWMODE */
+	airo_get_mode,		/* SIOCGIWMODE */
+	airo_set_sens,		/* SIOCSIWSENS */
+	airo_get_sens,		/* SIOCGIWSENS */
+	NULL,			/* SIOCSIWRANGE */
+	airo_get_range,		/* SIOCGIWRANGE */
+	NULL,			/* SIOCSIWPRIV */
+	NULL,			/* SIOCGIWPRIV */
+	NULL,			/* SIOCSIWSTATS */
+	NULL,			/* SIOCGIWSTATS */
 	iw_handler_set_spy,			/* SIOCSIWSPY */
 	iw_handler_get_spy,			/* SIOCGIWSPY */
 	iw_handler_set_thrspy,			/* SIOCSIWTHRSPY */
 	iw_handler_get_thrspy,			/* SIOCGIWTHRSPY */
-	(iw_handler) airo_set_wap,		/* SIOCSIWAP */
-	(iw_handler) airo_get_wap,		/* SIOCGIWAP */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) airo_get_aplist,		/* SIOCGIWAPLIST */
-	(iw_handler) airo_set_scan,		/* SIOCSIWSCAN */
-	(iw_handler) airo_get_scan,		/* SIOCGIWSCAN */
-	(iw_handler) airo_set_essid,		/* SIOCSIWESSID */
-	(iw_handler) airo_get_essid,		/* SIOCGIWESSID */
-	(iw_handler) airo_set_nick,		/* SIOCSIWNICKN */
-	(iw_handler) airo_get_nick,		/* SIOCGIWNICKN */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) airo_set_rate,		/* SIOCSIWRATE */
-	(iw_handler) airo_get_rate,		/* SIOCGIWRATE */
-	(iw_handler) airo_set_rts,		/* SIOCSIWRTS */
-	(iw_handler) airo_get_rts,		/* SIOCGIWRTS */
-	(iw_handler) airo_set_frag,		/* SIOCSIWFRAG */
-	(iw_handler) airo_get_frag,		/* SIOCGIWFRAG */
-	(iw_handler) airo_set_txpow,		/* SIOCSIWTXPOW */
-	(iw_handler) airo_get_txpow,		/* SIOCGIWTXPOW */
-	(iw_handler) airo_set_retry,		/* SIOCSIWRETRY */
-	(iw_handler) airo_get_retry,		/* SIOCGIWRETRY */
-	(iw_handler) airo_set_encode,		/* SIOCSIWENCODE */
-	(iw_handler) airo_get_encode,		/* SIOCGIWENCODE */
-	(iw_handler) airo_set_power,		/* SIOCSIWPOWER */
-	(iw_handler) airo_get_power,		/* SIOCGIWPOWER */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* -- hole -- */
-	(iw_handler) NULL,			/* SIOCSIWGENIE */
-	(iw_handler) NULL,			/* SIOCGIWGENIE */
-	(iw_handler) airo_set_auth,		/* SIOCSIWAUTH */
-	(iw_handler) airo_get_auth,		/* SIOCGIWAUTH */
-	(iw_handler) airo_set_encodeext,	/* SIOCSIWENCODEEXT */
-	(iw_handler) airo_get_encodeext,	/* SIOCGIWENCODEEXT */
-	(iw_handler) NULL,			/* SIOCSIWPMKSA */
+	airo_set_wap,		/* SIOCSIWAP */
+	airo_get_wap,		/* SIOCGIWAP */
+	NULL,			/* -- hole -- */
+	airo_get_aplist,		/* SIOCGIWAPLIST */
+	airo_set_scan,		/* SIOCSIWSCAN */
+	airo_get_scan,		/* SIOCGIWSCAN */
+	airo_set_essid,		/* SIOCSIWESSID */
+	airo_get_essid,		/* SIOCGIWESSID */
+	airo_set_nick,		/* SIOCSIWNICKN */
+	airo_get_nick,		/* SIOCGIWNICKN */
+	NULL,			/* -- hole -- */
+	NULL,			/* -- hole -- */
+	airo_set_rate,		/* SIOCSIWRATE */
+	airo_get_rate,		/* SIOCGIWRATE */
+	airo_set_rts,		/* SIOCSIWRTS */
+	airo_get_rts,		/* SIOCGIWRTS */
+	airo_set_frag,		/* SIOCSIWFRAG */
+	airo_get_frag,		/* SIOCGIWFRAG */
+	airo_set_txpow,		/* SIOCSIWTXPOW */
+	airo_get_txpow,		/* SIOCGIWTXPOW */
+	airo_set_retry,		/* SIOCSIWRETRY */
+	airo_get_retry,		/* SIOCGIWRETRY */
+	airo_set_encode,		/* SIOCSIWENCODE */
+	airo_get_encode,		/* SIOCGIWENCODE */
+	airo_set_power,		/* SIOCSIWPOWER */
+	airo_get_power,		/* SIOCGIWPOWER */
+	NULL,			/* -- hole -- */
+	NULL,			/* -- hole -- */
+	NULL,			/* SIOCSIWGENIE */
+	NULL,			/* SIOCGIWGENIE */
+	airo_set_auth,		/* SIOCSIWAUTH */
+	airo_get_auth,		/* SIOCGIWAUTH */
+	airo_set_encodeext,	/* SIOCSIWENCODEEXT */
+	airo_get_encodeext,	/* SIOCGIWENCODEEXT */
+	NULL,			/* SIOCSIWPMKSA */
 };
 
 /* Note : don't describe AIROIDIFC and AIROOLDIDIFC in here.
@@ -7857,7 +7888,7 @@ static int writerids(struct net_device *dev, aironet_ioctl *comp) {
 	struct airo_info *ai = dev->ml_priv;
 	int  ridcode;
         int  enabled;
-	static int (* writer)(struct airo_info *, u16 rid, const void *, int, int);
+	int (* writer)(struct airo_info *, u16 rid, const void *, int, int);
 	unsigned char *iobuf;
 
 	/* Only super-user can write RIDs */

@@ -74,7 +74,7 @@ static void scs_output_trigger(struct snd_rawmidi_substream *stream, int up)
 {
 	struct scs *scs = stream->rmidi->private_data;
 
-	ACCESS_ONCE(scs->output) = up ? stream : NULL;
+	ACCESS_ONCE_RW(scs->output) = up ? stream : NULL;
 	if (up) {
 		scs->output_idle = false;
 		tasklet_schedule(&scs->tasklet);
@@ -257,7 +257,7 @@ static void scs_input_trigger(struct snd_rawmidi_substream *stream, int up)
 {
 	struct scs *scs = stream->rmidi->private_data;
 
-	ACCESS_ONCE(scs->input) = up ? stream : NULL;
+	ACCESS_ONCE_RW(scs->input) = up ? stream : NULL;
 }
 
 static void scs_input_escaped_byte(struct snd_rawmidi_substream *stream,
@@ -473,8 +473,8 @@ static void scs_remove(struct fw_unit *unit)
 
 	snd_card_disconnect(scs->card);
 
-	ACCESS_ONCE(scs->output) = NULL;
-	ACCESS_ONCE(scs->input) = NULL;
+	ACCESS_ONCE_RW(scs->output) = NULL;
+	ACCESS_ONCE_RW(scs->input) = NULL;
 
 	wait_event(scs->idle_wait, scs->output_idle);
 

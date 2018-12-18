@@ -1060,6 +1060,11 @@ int exynos_g2d_get_ver_ioctl(struct drm_device *drm_dev, void *data,
 	return 0;
 }
 
+static void exynos_g2d_dmabuf_destroy(struct drm_pending_event *event)
+{
+	kfree(event);
+}
+
 int exynos_g2d_set_cmdlist_ioctl(struct drm_device *drm_dev, void *data,
 				 struct drm_file *file)
 {
@@ -1118,7 +1123,7 @@ int exynos_g2d_set_cmdlist_ioctl(struct drm_device *drm_dev, void *data,
 		e->event.user_data = req->user_data;
 		e->base.event = &e->event.base;
 		e->base.file_priv = file;
-		e->base.destroy = (void (*) (struct drm_pending_event *)) kfree;
+		e->base.destroy = exynos_g2d_dmabuf_destroy;
 
 		node->event = e;
 	}

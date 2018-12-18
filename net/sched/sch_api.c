@@ -837,7 +837,7 @@ static int qdisc_graft(struct net_device *dev, struct Qdisc *parent,
 
 			old = dev_graft_qdisc(dev_queue, new);
 			if (new && i > 0)
-				atomic_inc(&new->refcnt);
+				qdisc_refcount_inc(new);
 
 			if (!ingress)
 				qdisc_destroy(old);
@@ -848,7 +848,7 @@ skip:
 			notify_and_destroy(net, skb, n, classid,
 					   dev->qdisc, new);
 			if (new && !new->ops->attach)
-				atomic_inc(&new->refcnt);
+				qdisc_refcount_inc(new);
 			dev->qdisc = new ? : &noop_qdisc;
 
 			if (new && new->ops->attach)
@@ -1110,6 +1110,14 @@ check_loop_fn(struct Qdisc *q, unsigned long cl, struct qdisc_walker *w)
  * Delete/get qdisc.
  */
 
+const struct nla_policy rtm_tca_policy[TCA_MAX + 1] = {
+	[TCA_KIND]		= { .type = NLA_STRING },
+	[TCA_OPTIONS]		= { .type = NLA_NESTED },
+	[TCA_RATE]		= { .type = NLA_BINARY,
+				    .len = sizeof(struct tc_estimator) },
+	[TCA_STAB]		= { .type = NLA_NESTED },
+};
+
 static int tc_get_qdisc(struct sk_buff *skb, struct nlmsghdr *n)
 {
 	struct net *net = sock_net(skb->sk);
@@ -1125,7 +1133,7 @@ static int tc_get_qdisc(struct sk_buff *skb, struct nlmsghdr *n)
 	    !netlink_ns_capable(skb, net->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
-	err = nlmsg_parse(n, sizeof(*tcm), tca, TCA_MAX, NULL);
+	err = nlmsg_parse(n, sizeof(*tcm), tca, TCA_MAX, rtm_tca_policy);
 	if (err < 0)
 		return err;
 
@@ -1194,7 +1202,7 @@ static int tc_modify_qdisc(struct sk_buff *skb, struct nlmsghdr *n)
 
 replay:
 	/* Reinit, just in case something touches this. */
-	err = nlmsg_parse(n, sizeof(*tcm), tca, TCA_MAX, NULL);
+	err = nlmsg_parse(n, sizeof(*tcm), tca, TCA_MAX, rtm_tca_policy);
 	if (err < 0)
 		return err;
 
@@ -1241,7 +1249,7 @@ replay:
 				if (q == p ||
 				    (p && check_loop(q, p, 0)))
 					return -ELOOP;
-				atomic_inc(&q->refcnt);
+				qdisc_refcount_inc(q);
 				goto graft;
 			} else {
 				if (!q)
@@ -1540,7 +1548,7 @@ static int tc_ctl_tclass(struct sk_buff *skb, struct nlmsghdr *n)
 	    !netlink_ns_capable(skb, net->user_ns, CAP_NET_ADMIN))
 		return -EPERM;
 
-	err = nlmsg_parse(n, sizeof(*tcm), tca, TCA_MAX, NULL);
+	err = nlmsg_parse(n, sizeof(*tcm), tca, TCA_MAX, rtm_tca_policy);
 	if (err < 0)
 		return err;
 

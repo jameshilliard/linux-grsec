@@ -34,6 +34,7 @@ enum { sysctl_hung_task_timeout_secs = 0 };
 #define DEFAULT_MAX_MAP_COUNT	(USHRT_MAX - MAPCOUNT_ELF_CORE_MARGIN)
 
 extern int sysctl_max_map_count;
+extern unsigned long sysctl_heap_stack_gap;
 
 extern unsigned int sysctl_sched_latency;
 extern unsigned int sysctl_sched_min_granularity;

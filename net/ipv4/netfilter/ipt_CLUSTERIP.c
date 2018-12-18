@@ -115,7 +115,8 @@ clusterip_config_entry_put(struct clusterip_config *c)
 		 * functions are also incrementing the refcount on their own,
 		 * so it's safe to remove the entry even if it's in use. */
 #ifdef CONFIG_PROC_FS
-		proc_remove(c->pde);
+		if (cn->procdir)
+			proc_remove(c->pde);
 #endif
 		return;
 	}
@@ -146,8 +147,12 @@ clusterip_config_find_get(struct net *net, __be32 clusterip, int entry)
 	if (c) {
 		if (unlikely(!atomic_inc_not_zero(&c->refcount)))
 			c = NULL;
-		else if (entry)
-			atomic_inc(&c->entries);
+		else if (entry) {
+			if (unlikely(!atomic_inc_not_zero(&c->entries))) {
+				clusterip_config_put(c);
+				c = NULL;
+			}
+		}
 	}
 	rcu_read_unlock_bh();
 
@@ -427,12 +432,15 @@ static int clusterip_tg_check(const struct xt_tgchk_param *par)
 			dev_mc_add(config->dev, config->clustermac);
 		}
 	}
-	cipinfo->config = config;
 
 	ret = nf_ct_l3proto_try_module_get(par->family);
-	if (ret < 0)
+	if (ret < 0) {
 		pr_info("cannot load conntrack support for proto=%u\n",
 			par->family);
+		clusterip_config_entry_put(config);
+		clusterip_config_put(config);
+		return ret;
+	}
 
 	if (!par->net->xt.clusterip_deprecated_warning) {
 		pr_info("ipt_CLUSTERIP is deprecated and it will removed soon, "
@@ -440,6 +448,7 @@ static int clusterip_tg_check(const struct xt_tgchk_param *par)
 		par->net->xt.clusterip_deprecated_warning = true;
 	}
 
+	cipinfo->config = config;
 	return ret;
 }
 
@@ -740,7 +749,7 @@ static int clusterip_net_init(struct net *net)
 	spin_lock_init(&cn->lock);
 
 #ifdef CONFIG_PROC_FS
-	cn->procdir = proc_mkdir("ipt_CLUSTERIP", net->proc_net);
+	cn->procdir = proc_mkdir_restrict("ipt_CLUSTERIP", net->proc_net);
 	if (!cn->procdir) {
 		pr_err("Unable to proc dir entry\n");
 		return -ENOMEM;
@@ -755,6 +764,7 @@ static void clusterip_net_exit(struct net *net)
 #ifdef CONFIG_PROC_FS
 	struct clusterip_net *cn = net_generic(net, clusterip_net_id);
 	proc_remove(cn->procdir);
+	cn->procdir = NULL;
 #endif
 }
 

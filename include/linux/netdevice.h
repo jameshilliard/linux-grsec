@@ -1237,6 +1237,7 @@ struct net_device_ops {
 	int			(*ndo_fill_metadata_dst)(struct net_device *dev,
 						       struct sk_buff *skb);
 };
+typedef struct net_device_ops __no_const net_device_ops_no_const;
 
 /**
  * enum net_device_priv_flags - &struct net_device priv_flags
@@ -1548,7 +1549,7 @@ struct net_device {
 	unsigned long		base_addr;
 	int			irq;
 
-	atomic_t		carrier_changes;
+	atomic_unchecked_t	carrier_changes;
 
 	/*
 	 *	Some hardware also needs these fields (state,dev_list,
@@ -1587,8 +1588,8 @@ struct net_device {
 
 	struct net_device_stats	stats;
 
-	atomic_long_t		rx_dropped;
-	atomic_long_t		tx_dropped;
+	atomic_long_unchecked_t	rx_dropped;
+	atomic_long_unchecked_t	tx_dropped;
 
 #ifdef CONFIG_WIRELESS_EXT
 	const struct iw_handler_def *	wireless_handlers;
@@ -3949,7 +3950,7 @@ static inline void netif_keep_dst(struct net_device *dev)
 	dev->priv_flags &= ~(IFF_XMIT_DST_RELEASE | IFF_XMIT_DST_RELEASE_PERM);
 }
 
-extern struct pernet_operations __net_initdata loopback_net_ops;
+extern struct pernet_operations __net_initconst loopback_net_ops;
 
 /* Logging, debugging and troubleshooting/diagnostic helpers. */
 

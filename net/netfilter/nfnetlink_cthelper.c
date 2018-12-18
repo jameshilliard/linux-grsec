@@ -147,8 +147,8 @@ nfnl_cthelper_expect_policy(struct nf_conntrack_expect_policy *expect_policy,
 	    !tb[NFCTH_POLICY_EXPECT_TIMEOUT])
 		return -EINVAL;
 
-	strncpy(expect_policy->name,
-		nla_data(tb[NFCTH_POLICY_NAME]), NF_CT_HELPER_NAME_LEN);
+	nla_strlcpy(expect_policy->name,
+		    tb[NFCTH_POLICY_NAME], NF_CT_HELPER_NAME_LEN);
 	expect_policy->max_expected =
 		ntohl(nla_get_be32(tb[NFCTH_POLICY_EXPECT_MAX]));
 	expect_policy->timeout =
@@ -228,8 +228,14 @@ nfnl_cthelper_create(const struct nlattr * const tb[],
 	if (ret < 0)
 		goto err1;
 
-	strncpy(helper->name, nla_data(tb[NFCTH_NAME]), NF_CT_HELPER_NAME_LEN);
+	nla_strlcpy(helper->name,
+		    tb[NFCTH_NAME], NF_CT_HELPER_NAME_LEN);
 	helper->data_len = ntohl(nla_get_be32(tb[NFCTH_PRIV_DATA_LEN]));
+	if (helper->data_len > 32) {
+		ret = -ENOMEM;
+		goto err2;
+	}
+
 	helper->flags |= NF_CT_HELPER_F_USERSPACE;
 	memcpy(&helper->tuple, tuple, sizeof(struct nf_conntrack_tuple));
 
@@ -603,7 +609,7 @@ nfnl_cthelper_get(struct sock *nfnl, struct sk_buff *skb,
 		return -EPERM;
 
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {
-		struct netlink_dump_control c = {
+		static struct netlink_dump_control c = {
 			.dump = nfnl_cthelper_dump_table,
 		};
 		return netlink_dump_start(nfnl, skb, nlh, &c);

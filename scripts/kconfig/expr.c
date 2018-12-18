@@ -1005,22 +1005,28 @@ static int expr_compare_type(enum expr_type t1, enum expr_type t2)
 	case E_GTH:
 		if (t2 == E_EQUAL || t2 == E_UNEQUAL)
 			return 1;
+		/* FALLTHROUGH */
 	case E_EQUAL:
 	case E_UNEQUAL:
 		if (t2 == E_NOT)
 			return 1;
+		/* FALLTHROUGH */
 	case E_NOT:
 		if (t2 == E_AND)
 			return 1;
+		/* FALLTHROUGH */
 	case E_AND:
 		if (t2 == E_OR)
 			return 1;
+		/* FALLTHROUGH */
 	case E_OR:
 		if (t2 == E_LIST)
 			return 1;
+		/* FALLTHROUGH */
 	case E_LIST:
 		if (t2 == 0)
 			return 1;
+		/* FALLTHROUGH */
 	default:
 		return -1;
 	}

@@ -49,13 +49,13 @@ EXPORT_SYMBOL(cfs_race_state);
 
 int __cfs_fail_check_set(__u32 id, __u32 value, int set)
 {
-	static atomic_t cfs_fail_count = ATOMIC_INIT(0);
+	static atomic_unchecked_t cfs_fail_count = ATOMIC_INIT(0);
 
 	LASSERT(!(id & CFS_FAIL_ONCE));
 
 	if ((cfs_fail_loc & (CFS_FAILED | CFS_FAIL_ONCE)) ==
 	    (CFS_FAILED | CFS_FAIL_ONCE)) {
-		atomic_set(&cfs_fail_count, 0); /* paranoia */
+		atomic_set_unchecked(&cfs_fail_count, 0); /* paranoia */
 		return 0;
 	}
 
@@ -67,7 +67,7 @@ int __cfs_fail_check_set(__u32 id, __u32 value, int set)
 
 	/* Skip the first cfs_fail_val, then fail */
 	if (cfs_fail_loc & CFS_FAIL_SKIP) {
-		if (atomic_inc_return(&cfs_fail_count) <= cfs_fail_val)
+		if (atomic_inc_return_unchecked(&cfs_fail_count) <= cfs_fail_val)
 			return 0;
 	}
 
@@ -80,11 +80,11 @@ int __cfs_fail_check_set(__u32 id, __u32 value, int set)
 	/* Fail cfs_fail_val times, overridden by FAIL_ONCE */
 	if (cfs_fail_loc & CFS_FAIL_SOME &&
 	    (!(cfs_fail_loc & CFS_FAIL_ONCE) || cfs_fail_val <= 1)) {
-		int count = atomic_inc_return(&cfs_fail_count);
+		int count = atomic_inc_return_unchecked(&cfs_fail_count);
 
 		if (count >= cfs_fail_val) {
 			set_bit(CFS_FAIL_ONCE_BIT, &cfs_fail_loc);
-			atomic_set(&cfs_fail_count, 0);
+			atomic_set_unchecked(&cfs_fail_count, 0);
 			/* we are lost race to increase  */
 			if (count > cfs_fail_val)
 				return 0;

@@ -81,7 +81,7 @@ enum batadv_dhcp_recipient {
 struct batadv_hard_iface_bat_iv {
 	unsigned char *ogm_buff;
 	int ogm_buff_len;
-	atomic_t ogm_seqno;
+	atomic_unchecked_t ogm_seqno;
 };
 
 /**
@@ -529,7 +529,7 @@ enum batadv_counters {
  * @work: work queue callback item for translation table purging
  */
 struct batadv_priv_tt {
-	atomic_t vn;
+	atomic_unchecked_t vn;
 	atomic_t ogm_append_cnt;
 	atomic_t local_changes;
 	struct list_head changes_list;
@@ -784,7 +784,7 @@ struct batadv_priv {
 	atomic_t bonding;
 	atomic_t fragmentation;
 	atomic_t packet_size_max;
-	atomic_t frag_seqno;
+	atomic_unchecked_t frag_seqno;
 #ifdef CONFIG_BATMAN_ADV_BLA
 	atomic_t bridge_loop_avoidance;
 #endif
@@ -803,7 +803,7 @@ struct batadv_priv {
 #endif
 	u32 isolation_mark;
 	u32 isolation_mark_mask;
-	atomic_t bcast_seqno;
+	atomic_unchecked_t bcast_seqno;
 	atomic_t bcast_queue_left;
 	atomic_t batman_queue_left;
 	char num_ifaces;
@@ -999,11 +999,13 @@ struct batadv_tt_change_node {
  * struct batadv_tt_req_node - data to keep track of the tt requests in flight
  * @addr: mac address address of the originator this request was sent to
  * @issued_at: timestamp used for purging stale tt requests
+ * @refcount: number of contexts the object is used by
  * @list: list node for batadv_priv_tt::req_list
  */
 struct batadv_tt_req_node {
 	u8 addr[ETH_ALEN];
 	unsigned long issued_at;
+	struct kref refcount;
 	struct hlist_node list;
 };
 

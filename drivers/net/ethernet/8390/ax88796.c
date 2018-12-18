@@ -786,13 +786,13 @@ static int ax_init_dev(struct net_device *dev)
 
 	ret = ax_mii_init(dev);
 	if (ret)
-		goto out_irq;
+		goto err_out;
 
 	ax_NS8390_init(dev, 0);
 
 	ret = register_netdev(dev);
 	if (ret)
-		goto out_irq;
+		goto err_out;
 
 	netdev_info(dev, "%dbit, irq %d, %lx, MAC: %pM\n",
 		    ei_local->word16 ? 16 : 8, dev->irq, dev->base_addr,
@@ -800,9 +800,6 @@ static int ax_init_dev(struct net_device *dev)
 
 	return 0;
 
- out_irq:
-	/* cleanup irq */
-	free_irq(dev->irq, dev);
  err_out:
 	return ret;
 }
@@ -845,7 +842,7 @@ static int ax_probe(struct platform_device *pdev)
 	struct ei_device *ei_local;
 	struct ax_device *ax;
 	struct resource *irq, *mem, *mem2;
-	unsigned long mem_size, mem2_size = 0;
+	resource_size_t mem_size, mem2_size = 0;
 	int ret = 0;
 
 	dev = ax__alloc_ei_netdev(sizeof(struct ax_device));
@@ -889,9 +886,11 @@ static int ax_probe(struct platform_device *pdev)
 	if (ax->plat->reg_offsets)
 		ei_local->reg_offset = ax->plat->reg_offsets;
 	else {
+		resource_size_t _mem_size = mem_size;
+		_mem_size /= 0x18;
 		ei_local->reg_offset = ax->reg_offsets;
 		for (ret = 0; ret < 0x18; ret++)
-			ax->reg_offsets[ret] = (mem_size / 0x18) * ret;
+			ax->reg_offsets[ret] = _mem_size * ret;
 	}
 
 	if (!request_mem_region(mem->start, mem_size, pdev->name)) {
@@ -947,7 +946,8 @@ static int ax_probe(struct platform_device *pdev)
 	iounmap(ax->map2);
 
  exit_mem2:
-	release_mem_region(mem2->start, mem2_size);
+	if (mem2)
+		release_mem_region(mem2->start, mem2_size);
 
  exit_mem1:
 	iounmap(ei_local->mem);

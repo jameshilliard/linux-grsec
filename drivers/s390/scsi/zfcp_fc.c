@@ -817,14 +817,14 @@ static void zfcp_fc_rspn(struct zfcp_adapter *adapter,
 	struct zfcp_fsf_ct_els *ct_els = &fc_req->ct_els;
 	struct zfcp_fc_rspn_req *rspn_req = &fc_req->u.rspn.req;
 	struct fc_ct_hdr *rspn_rsp = &fc_req->u.rspn.rsp;
-	int ret, len;
+	int ret;
 
 	zfcp_fc_ct_ns_init(&rspn_req->ct_hdr, FC_NS_RSPN_ID,
 			   FC_SYMBOLIC_NAME_SIZE);
 	hton24(rspn_req->rspn.fr_fid.fp_fid, fc_host_port_id(shost));
-	len = strlcpy(rspn_req->rspn.fr_name, fc_host_symbolic_name(shost),
+	strlcpy(rspn_req->rspn.fr_name, fc_host_symbolic_name(shost),
 		      FC_SYMBOLIC_NAME_SIZE);
-	rspn_req->rspn.fr_name_len = len;
+	rspn_req->rspn.fr_name_len = strlen(rspn_req->rspn.fr_name);
 
 	sg_init_one(&fc_req->sg_req, rspn_req, sizeof(*rspn_req));
 	sg_init_one(&fc_req->sg_rsp, rspn_rsp, sizeof(*rspn_rsp));

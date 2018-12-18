@@ -1,4 +1,5 @@
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 # enter salsa20_encrypt_bytes
 ENTRY(salsa20_encrypt_bytes)
@@ -789,6 +790,7 @@ ENTRY(salsa20_encrypt_bytes)
 	add	%r11,%rsp
 	mov	%rdi,%rax
 	mov	%rsi,%rdx
+	pax_force_retaddr
 	ret
 #   bytesatleast65:
 ._bytesatleast65:
@@ -889,6 +891,7 @@ ENTRY(salsa20_keysetup)
 	add	%r11,%rsp
 	mov	%rdi,%rax
 	mov	%rsi,%rdx
+	pax_force_retaddr
 	ret
 ENDPROC(salsa20_keysetup)
 
@@ -914,5 +917,6 @@ ENTRY(salsa20_ivsetup)
 	add	%r11,%rsp
 	mov	%rdi,%rax
 	mov	%rsi,%rdx
+	pax_force_retaddr
 	ret
 ENDPROC(salsa20_ivsetup)

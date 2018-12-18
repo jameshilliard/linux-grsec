@@ -1731,12 +1731,13 @@ static unsigned int ata_scsi_rw_xlat(struct ata_queued_cmd *qc)
 		goto nothing_to_do;
 
 	qc->flags |= ATA_QCFLAG_IO;
-	qc->nbytes = n_block * scmd->device->sector_size;
 
 	rc = ata_build_rw_tf(&qc->tf, qc->dev, block, n_block, tf_flags,
 			     qc->tag);
-	if (likely(rc == 0))
+	if (likely(rc == 0)) {
+		qc->nbytes = n_block * scmd->device->sector_size;
 		return 0;
+	}
 
 	if (rc == -ERANGE)
 		goto out_of_range;
@@ -4200,7 +4201,7 @@ int ata_sas_port_init(struct ata_port *ap)
 
 	if (rc)
 		return rc;
-	ap->print_id = atomic_inc_return(&ata_print_id);
+	ap->print_id = atomic_inc_return_unchecked(&ata_print_id);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(ata_sas_port_init);

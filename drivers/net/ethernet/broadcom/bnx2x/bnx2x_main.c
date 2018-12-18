@@ -13432,6 +13432,7 @@ static int bnx2x_init_firmware(struct bnx2x *bp)
 
 	/* Initialize the pointers to the init arrays */
 	/* Blob */
+	rc = -ENOMEM;
 	BNX2X_ALLOC_AND_SET(init_data, request_firmware_exit, be32_to_cpu_n);
 
 	/* Opcodes */
@@ -13909,14 +13910,14 @@ static int bnx2x_init_one(struct pci_dev *pdev,
 		bp->doorbells = bnx2x_vf_doorbells(bp);
 		rc = bnx2x_vf_pci_alloc(bp);
 		if (rc)
-			goto init_one_exit;
+			goto init_one_freemem;
 	} else {
 		doorbell_size = BNX2X_L2_MAX_CID(bp) * (1 << BNX2X_DB_SHIFT);
 		if (doorbell_size > pci_resource_len(pdev, 2)) {
 			dev_err(&bp->pdev->dev,
 				"Cannot map doorbells, bar size too small, aborting\n");
 			rc = -ENOMEM;
-			goto init_one_exit;
+			goto init_one_freemem;
 		}
 		bp->doorbells = ioremap_nocache(pci_resource_start(pdev, 2),
 						doorbell_size);
@@ -13925,19 +13926,19 @@ static int bnx2x_init_one(struct pci_dev *pdev,
 		dev_err(&bp->pdev->dev,
 			"Cannot map doorbell space, aborting\n");
 		rc = -ENOMEM;
-		goto init_one_exit;
+		goto init_one_freemem;
 	}
 
 	if (IS_VF(bp)) {
 		rc = bnx2x_vfpf_acquire(bp, tx_count, rx_count);
 		if (rc)
-			goto init_one_exit;
+			goto init_one_freemem;
 	}
 
 	/* Enable SRIOV if capability found in configuration space */
 	rc = bnx2x_iov_init_one(bp, int_mode, BNX2X_MAX_NUM_OF_VFS);
 	if (rc)
-		goto init_one_exit;
+		goto init_one_freemem;
 
 	/* calc qm_cid_count */
 	bp->qm_cid_count = bnx2x_set_qm_cid_count(bp);
@@ -13956,7 +13957,7 @@ static int bnx2x_init_one(struct pci_dev *pdev,
 	rc = bnx2x_set_int_mode(bp);
 	if (rc) {
 		dev_err(&pdev->dev, "Cannot set interrupts\n");
-		goto init_one_exit;
+		goto init_one_freemem;
 	}
 	BNX2X_DEV_INFO("set interrupts successfully\n");
 
@@ -13964,7 +13965,7 @@ static int bnx2x_init_one(struct pci_dev *pdev,
 	rc = register_netdev(dev);
 	if (rc) {
 		dev_err(&pdev->dev, "Cannot register net device\n");
-		goto init_one_exit;
+		goto init_one_freemem;
 	}
 	BNX2X_DEV_INFO("device name after netdev register %s\n", dev->name);
 
@@ -13996,6 +13997,9 @@ static int bnx2x_init_one(struct pci_dev *pdev,
 		bnx2x_set_os_driver_state(bp, OS_DRIVER_STATE_DISABLED);
 
 	return 0;
+
+init_one_freemem:
+	bnx2x_free_mem_bp(bp);
 
 init_one_exit:
 	bnx2x_disable_pcie_error_reporting(bp);
@@ -14168,7 +14172,7 @@ static int bnx2x_eeh_nic_unload(struct bnx2x *bp)
  * this device has been detected.
  */
 static pci_ers_result_t bnx2x_io_error_detected(struct pci_dev *pdev,
-						pci_channel_state_t state)
+						enum pci_channel_state state)
 {
 	struct net_device *dev = pci_get_drvdata(pdev);
 	struct bnx2x *bp = netdev_priv(dev);

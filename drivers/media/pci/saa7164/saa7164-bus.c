@@ -468,6 +468,22 @@ int saa7164_bus_get(struct saa7164_dev *dev, struct tmComResInfo* msg,
 				buf_size);
 	}
 
+	/* Check again after the second fetch that 
+	* the command/response matches what is expected, 
+	* msg_tmp is the previously validated message, 
+	* msg is the new fetched message. 
+	*/
+	if ((msg_tmp.id != msg->id) || (msg_tmp.command != msg->command) ||
+		(msg_tmp.controlselector != msg->controlselector) ||
+		(msg_tmp.seqno != msg->seqno) || (msg_tmp.size != msg->size)) {
+
+		printk(KERN_ERR "%s() Unexpected msg miss-match (double fetch)\n", __func__);
+		saa7164_bus_dumpmsg(dev, msg, buf);
+		saa7164_bus_dumpmsg(dev, &msg_tmp, NULL);
+		ret = SAA_ERR_INVALID_COMMAND;
+		goto out;
+	}
+
 	/* Update the read positions, adjusting the ring */
 	saa7164_writel(bus->m_dwGetReadPos, new_grp);
 

@@ -7,6 +7,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .text
 

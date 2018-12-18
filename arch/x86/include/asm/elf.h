@@ -75,9 +75,6 @@ typedef struct user_fxsr_struct elf_fpxregset_t;
 
 #include <asm/vdso.h>
 
-#ifdef CONFIG_X86_64
-extern unsigned int vdso64_enabled;
-#endif
 #if defined(CONFIG_X86_32) || defined(CONFIG_IA32_EMULATION)
 extern unsigned int vdso32_enabled;
 #endif
@@ -254,6 +251,20 @@ extern int force_personality32;
 #define ELF_ET_DYN_BASE		(mmap_is_ia32() ? 0x000400000UL : \
 						  (TASK_SIZE / 3 * 2))
 
+#ifdef CONFIG_PAX_ASLR
+#ifdef CONFIG_X86_32
+#define PAX_ELF_ET_DYN_BASE	0x10000000UL
+
+#define PAX_DELTA_MMAP_LEN	(current->mm->pax_flags & MF_PAX_SEGMEXEC ? 15 : 16)
+#define PAX_DELTA_STACK_LEN	(current->mm->pax_flags & MF_PAX_SEGMEXEC ? 15 : 16)
+#else
+#define PAX_ELF_ET_DYN_BASE	0x400000UL
+
+#define PAX_DELTA_MMAP_LEN	(mmap_is_ia32() ? 16 : TASK_SIZE_MAX_SHIFT - PAGE_SHIFT - 3)
+#define PAX_DELTA_STACK_LEN	(mmap_is_ia32() ? 16 : TASK_SIZE_MAX_SHIFT - PAGE_SHIFT - 3)
+#endif
+#endif
+
 /* This yields a mask that user programs can use to figure out what
    instruction set this CPU supports.  This could be done in user space,
    but it's not easy, and we've already done it here.  */
@@ -301,17 +312,13 @@ do {									\
 
 #define ARCH_DLINFO							\
 do {									\
-	if (vdso64_enabled)						\
-		NEW_AUX_ENT(AT_SYSINFO_EHDR,				\
-			    (unsigned long __force)current->mm->context.vdso); \
+	NEW_AUX_ENT(AT_SYSINFO_EHDR, current->mm->context.vdso);	\
 } while (0)
 
 /* As a historical oddity, the x32 and x86_64 vDSOs are controlled together. */
 #define ARCH_DLINFO_X32							\
 do {									\
-	if (vdso64_enabled)						\
-		NEW_AUX_ENT(AT_SYSINFO_EHDR,				\
-			    (unsigned long __force)current->mm->context.vdso); \
+	NEW_AUX_ENT(AT_SYSINFO_EHDR, current->mm->context.vdso);	\
 } while (0)
 
 #define AT_SYSINFO		32
@@ -326,10 +333,10 @@ else									\
 
 #endif /* !CONFIG_X86_32 */
 
-#define VDSO_CURRENT_BASE	((unsigned long)current->mm->context.vdso)
+#define VDSO_CURRENT_BASE	(current->mm->context.vdso)
 
 #define VDSO_ENTRY							\
-	((unsigned long)current->mm->context.vdso +			\
+	(current->mm->context.vdso +					\
 	 vdso_image_32.sym___kernel_vsyscall)
 
 struct linux_binprm;

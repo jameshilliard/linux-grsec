@@ -9,6 +9,7 @@
 #include <asm/fpu/regset.h>
 #include <asm/fpu/signal.h>
 #include <asm/traps.h>
+#include <asm/irq_regs.h>
 
 #include <linux/hardirq.h>
 
@@ -112,7 +113,7 @@ void __kernel_fpu_end(void)
 	struct fpu *fpu = &current->thread.fpu;
 
 	if (fpu->fpregs_active)
-		copy_kernel_to_fpregs(&fpu->state);
+		copy_kernel_to_fpregs(fpu->_state);
 
 	kernel_fpu_enable();
 }
@@ -173,7 +174,7 @@ void fpu__save(struct fpu *fpu)
 	preempt_disable();
 	if (fpu->fpregs_active) {
 		if (!copy_fpregs_to_fpstate(fpu)) {
-			copy_kernel_to_fpregs(&fpu->state);
+			copy_kernel_to_fpregs(fpu->_state);
 		}
 	}
 	preempt_enable();
@@ -221,7 +222,7 @@ static void fpu_copy(struct fpu *dst_fpu, struct fpu *src_fpu)
 	 * Don't let 'init optimized' areas of the XSAVE area
 	 * leak into the child task:
 	 */
-	memset(&dst_fpu->state.xsave, 0, xstate_size);
+	memset(&dst_fpu->_state->xsave, 0, xstate_size);
 
 	/*
 	 * Save current FPU registers directly into the child
@@ -241,9 +242,9 @@ static void fpu_copy(struct fpu *dst_fpu, struct fpu *src_fpu)
 	 */
 	preempt_disable();
 	if (!copy_fpregs_to_fpstate(dst_fpu)) {
-		memcpy(&src_fpu->state, &dst_fpu->state, xstate_size);
+		memcpy(src_fpu->_state, dst_fpu->_state, xstate_size);
 
-		copy_kernel_to_fpregs(&src_fpu->state);
+		copy_kernel_to_fpregs(src_fpu->_state);
 	}
 	preempt_enable();
 }
@@ -268,7 +269,7 @@ void fpu__activate_curr(struct fpu *fpu)
 	WARN_ON_FPU(fpu != &current->thread.fpu);
 
 	if (!fpu->fpstate_active) {
-		fpstate_init(&fpu->state);
+		fpstate_init(fpu->_state);
 
 		/* Safe to do for the current task: */
 		fpu->fpstate_active = 1;
@@ -294,7 +295,7 @@ void fpu__activate_fpstate_read(struct fpu *fpu)
 		fpu__save(fpu);
 	} else {
 		if (!fpu->fpstate_active) {
-			fpstate_init(&fpu->state);
+			fpstate_init(fpu->_state);
 
 			/* Safe to do for current and for stopped child tasks: */
 			fpu->fpstate_active = 1;
@@ -327,7 +328,7 @@ void fpu__activate_fpstate_write(struct fpu *fpu)
 		/* Invalidate any lazy state: */
 		fpu->last_cpu = -1;
 	} else {
-		fpstate_init(&fpu->state);
+		fpstate_init(fpu->_state);
 
 		/* Safe to do for stopped child tasks: */
 		fpu->fpstate_active = 1;
@@ -351,7 +352,7 @@ void fpu__restore(struct fpu *fpu)
 	/* Avoid __kernel_fpu_begin() right after fpregs_activate() */
 	kernel_fpu_disable();
 	fpregs_activate(fpu);
-	copy_kernel_to_fpregs(&fpu->state);
+	copy_kernel_to_fpregs(fpu->_state);
 	kernel_fpu_enable();
 }
 EXPORT_SYMBOL_GPL(fpu__restore);
@@ -406,14 +407,14 @@ void fpu__clear(struct fpu *fpu)
 {
 	WARN_ON_FPU(fpu != &current->thread.fpu); /* Almost certainly an anomaly */
 
-	if (!static_cpu_has(X86_FEATURE_FPU)) {
-		/* FPU state will be reallocated lazily at the first use. */
-		fpu__drop(fpu);
-	} else {
-		if (!fpu->fpstate_active) {
-			fpu__activate_curr(fpu);
-			user_fpu_begin();
-		}
+	fpu__drop(fpu);
+
+	/*
+	 * Make sure fpstate is cleared and initialized.
+	 */
+	if (static_cpu_has(X86_FEATURE_FPU)) {
+		fpu__activate_curr(fpu);
+		user_fpu_begin();
 		copy_init_fpstate_to_fpregs();
 	}
 }
@@ -425,25 +426,25 @@ void fpu__clear(struct fpu *fpu)
 static inline unsigned short get_fpu_cwd(struct fpu *fpu)
 {
 	if (cpu_has_fxsr) {
-		return fpu->state.fxsave.cwd;
+		return fpu->_state->fxsave.cwd;
 	} else {
-		return (unsigned short)fpu->state.fsave.cwd;
+		return (unsigned short)fpu->_state->fsave.cwd;
 	}
 }
 
 static inline unsigned short get_fpu_swd(struct fpu *fpu)
 {
 	if (cpu_has_fxsr) {
-		return fpu->state.fxsave.swd;
+		return fpu->_state->fxsave.swd;
 	} else {
-		return (unsigned short)fpu->state.fsave.swd;
+		return (unsigned short)fpu->_state->fsave.swd;
 	}
 }
 
 static inline unsigned short get_fpu_mxcsr(struct fpu *fpu)
 {
 	if (cpu_has_xmm) {
-		return fpu->state.fxsave.mxcsr;
+		return fpu->_state->fxsave.mxcsr;
 	} else {
 		return MXCSR_DEFAULT;
 	}

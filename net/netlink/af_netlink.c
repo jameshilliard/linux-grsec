@@ -329,7 +329,7 @@ static void netlink_overrun(struct sock *sk)
 			sk->sk_error_report(sk);
 		}
 	}
-	atomic_inc(&sk->sk_drops);
+	atomic_inc_unchecked(&sk->sk_drops);
 }
 
 static void netlink_rcv_wake(struct sock *sk)
@@ -703,6 +703,9 @@ static void deferred_put_nlk_sk(struct rcu_head *head)
 	struct netlink_sock *nlk = container_of(head, struct netlink_sock, rcu);
 	struct sock *sk = &nlk->sk;
 
+	kfree(nlk->groups);
+	nlk->groups = NULL;
+
 	if (!atomic_dec_and_test(&sk->sk_refcnt))
 		return;
 
@@ -780,9 +783,6 @@ static int netlink_release(struct socket *sock)
 		}
 		netlink_table_ungrab();
 	}
-
-	kfree(nlk->groups);
-	nlk->groups = NULL;
 
 	local_bh_disable();
 	sock_prot_inuse_add(sock_net(sk), &netlink_proto, -1);
@@ -1774,11 +1774,12 @@ static void netlink_cmsg_recv_pktinfo(struct msghdr *msg, struct sk_buff *skb)
 static void netlink_cmsg_listen_all_nsid(struct sock *sk, struct msghdr *msg,
 					 struct sk_buff *skb)
 {
+	int nsid = NETLINK_CB(skb).nsid;
+
 	if (!NETLINK_CB(skb).nsid_is_set)
 		return;
 
-	put_cmsg(msg, SOL_NETLINK, NETLINK_LISTEN_ALL_NSID, sizeof(int),
-		 &NETLINK_CB(skb).nsid);
+	put_cmsg(msg, SOL_NETLINK, NETLINK_LISTEN_ALL_NSID, sizeof(nsid), &nsid);
 }
 
 static int netlink_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
@@ -2229,7 +2230,9 @@ errout_skb:
 
 int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 			 const struct nlmsghdr *nlh,
-			 struct netlink_dump_control *control)
+			 struct netlink_dump_control *control,
+			 void *data,
+			 struct module *module)
 {
 	struct netlink_callback *cb;
 	struct sock *sk;
@@ -2252,7 +2255,7 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 		goto error_unlock;
 	}
 	/* add reference of module which cb->dump belongs to */
-	if (!try_module_get(control->module)) {
+	if (!try_module_get(module)) {
 		ret = -EPROTONOSUPPORT;
 		goto error_unlock;
 	}
@@ -2263,10 +2266,16 @@ int __netlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 	cb->dump = control->dump;
 	cb->done = control->done;
 	cb->nlh = nlh;
-	cb->data = control->data;
-	cb->module = control->module;
+	cb->data = data;
+	cb->module = module;
 	cb->min_dump_alloc = control->min_dump_alloc;
 	cb->skb = skb;
+
+	if (cb->start) {
+		ret = cb->start(cb);
+		if (ret)
+			goto error_unlock;
+	}
 
 	nlk->cb_running = true;
 	nlk->dump_done_errno = INT_MAX;
@@ -2532,7 +2541,7 @@ static int netlink_seq_show(struct seq_file *seq, void *v)
 			   sk_wmem_alloc_get(s),
 			   nlk->cb_running,
 			   atomic_read(&s->sk_refcnt),
-			   atomic_read(&s->sk_drops),
+			   atomic_read_unchecked(&s->sk_drops),
 			   sock_i_ino(s)
 			);
 
@@ -2639,7 +2648,7 @@ static void __init netlink_add_usersock_entry(void)
 	netlink_table_ungrab();
 }
 
-static struct pernet_operations __net_initdata netlink_net_ops = {
+static struct pernet_operations __net_initconst netlink_net_ops = {
 	.init = netlink_net_init,
 	.exit = netlink_net_exit,
 };

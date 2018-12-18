@@ -613,6 +613,10 @@ void oom_kill_process(struct oom_control *oc, struct task_struct *p,
 		if (p->signal->oom_score_adj == OOM_SCORE_ADJ_MIN)
 			continue;
 
+		task_lock(p);	/* Protect ->comm from prctl() */
+		pr_err("Kill process %d (%s) sharing same memory\n",
+			task_pid_nr(p), p->comm);
+		task_unlock(p);
 		do_send_sig_info(SIGKILL, SEND_SIG_FORCED, p, true);
 	}
 	rcu_read_unlock();

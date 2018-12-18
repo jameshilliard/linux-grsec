@@ -54,9 +54,17 @@ union geneve_addr {
 
 static union geneve_addr geneve_remote_unspec = { .sa.sa_family = AF_UNSPEC, };
 
+struct geneve_dev_node {
+	struct hlist_node hlist;
+	struct geneve_dev *geneve;
+};
+
 /* Pseudo network device */
 struct geneve_dev {
-	struct hlist_node  hlist;	/* vni hash table */
+	struct geneve_dev_node hlist4;	/* vni hash table for IPv4 socket */
+#if IS_ENABLED(CONFIG_IPV6)
+	struct geneve_dev_node hlist6;	/* vni hash table for IPv6 socket */
+#endif
 	struct net	   *net;	/* netns for packet i/o */
 	struct net_device  *dev;	/* netdev for geneve tunnel */
 	struct geneve_sock *sock4;	/* IPv4 socket used for geneve tunnel */
@@ -106,16 +114,16 @@ static struct geneve_dev *geneve_lookup(struct geneve_sock *gs,
 					__be32 addr, u8 vni[])
 {
 	struct hlist_head *vni_list_head;
-	struct geneve_dev *geneve;
+	struct geneve_dev_node *node;
 	__u32 hash;
 
 	/* Find the device for this VNI */
 	hash = geneve_net_vni_hash(vni);
 	vni_list_head = &gs->vni_list[hash];
-	hlist_for_each_entry_rcu(geneve, vni_list_head, hlist) {
-		if (!memcmp(vni, geneve->vni, sizeof(geneve->vni)) &&
-		    addr == geneve->remote.sin.sin_addr.s_addr)
-			return geneve;
+	hlist_for_each_entry_rcu(node, vni_list_head, hlist) {
+		if (!memcmp(vni, node->geneve->vni, sizeof(node->geneve->vni)) &&
+		    addr == node->geneve->remote.sin.sin_addr.s_addr)
+			return node->geneve;
 	}
 	return NULL;
 }
@@ -125,16 +133,16 @@ static struct geneve_dev *geneve6_lookup(struct geneve_sock *gs,
 					 struct in6_addr addr6, u8 vni[])
 {
 	struct hlist_head *vni_list_head;
-	struct geneve_dev *geneve;
+	struct geneve_dev_node *node;
 	__u32 hash;
 
 	/* Find the device for this VNI */
 	hash = geneve_net_vni_hash(vni);
 	vni_list_head = &gs->vni_list[hash];
-	hlist_for_each_entry_rcu(geneve, vni_list_head, hlist) {
-		if (!memcmp(vni, geneve->vni, sizeof(geneve->vni)) &&
-		    ipv6_addr_equal(&addr6, &geneve->remote.sin6.sin6_addr))
-			return geneve;
+	hlist_for_each_entry_rcu(node, vni_list_head, hlist) {
+		if (!memcmp(vni, node->geneve->vni, sizeof(node->geneve->vni)) &&
+		    ipv6_addr_equal(&addr6, &node->geneve->remote.sin6.sin6_addr))
+			return node->geneve;
 	}
 	return NULL;
 }
@@ -562,6 +570,7 @@ static int geneve_sock_add(struct geneve_dev *geneve, bool ipv6)
 {
 	struct net *net = geneve->net;
 	struct geneve_net *gn = net_generic(net, geneve_net_id);
+	struct geneve_dev_node *node;
 	struct geneve_sock *gs;
 	__u32 hash;
 
@@ -578,14 +587,19 @@ static int geneve_sock_add(struct geneve_dev *geneve, bool ipv6)
 out:
 	gs->collect_md = geneve->collect_md;
 #if IS_ENABLED(CONFIG_IPV6)
-	if (ipv6)
-		geneve->sock6 = gs;
-	else
+	if (ipv6) {
+		rcu_assign_pointer(geneve->sock6, gs);
+		node = &geneve->hlist6;
+	} else
 #endif
-		geneve->sock4 = gs;
+	{
+		rcu_assign_pointer(geneve->sock4, gs);
+		node = &geneve->hlist4;
+	}
+	node->geneve = geneve;
 
 	hash = geneve_net_vni_hash(geneve->vni);
-	hlist_add_head_rcu(&geneve->hlist, &gs->vni_list[hash]);
+	hlist_add_head_rcu(&node->hlist, &gs->vni_list[hash]);
 	return 0;
 }
 
@@ -614,8 +628,10 @@ static int geneve_stop(struct net_device *dev)
 {
 	struct geneve_dev *geneve = netdev_priv(dev);
 
-	if (!hlist_unhashed(&geneve->hlist))
-		hlist_del_rcu(&geneve->hlist);
+	hlist_del_init_rcu(&geneve->hlist4.hlist);
+#if IS_ENABLED(CONFIG_IPV6)
+	hlist_del_init_rcu(&geneve->hlist6.hlist);
+#endif
 	geneve_sock_release(geneve);
 	return 0;
 }
@@ -1322,7 +1338,7 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
-static struct rtnl_link_ops geneve_link_ops __read_mostly = {
+static struct rtnl_link_ops geneve_link_ops = {
 	.kind		= "geneve",
 	.maxtype	= IFLA_GENEVE_MAX,
 	.policy		= geneve_policy,

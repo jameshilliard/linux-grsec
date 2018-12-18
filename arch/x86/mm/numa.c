@@ -469,7 +469,7 @@ static void __init numa_clear_kernel_node_hotplug(void)
 {
 	int i, nid;
 	nodemask_t numa_kernel_nodes = NODE_MASK_NONE;
-	unsigned long start, end;
+	u64 start, end;
 	struct memblock_region *r;
 
 	/*
@@ -508,7 +508,7 @@ static void __init numa_clear_kernel_node_hotplug(void)
 	}
 }
 
-static int __init numa_register_memblks(struct numa_meminfo *mi)
+static int __init __intentional_overflow(-1) numa_register_memblks(struct numa_meminfo *mi)
 {
 	unsigned long uninitialized_var(pfn_align);
 	int i, nid;

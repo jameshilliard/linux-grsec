@@ -13,8 +13,10 @@
 #include <asm/irqflags.h>
 #include <asm/asm.h>
 #include <asm/smap.h>
+#include <asm/pgtable.h>
 #include <asm/pgtable_types.h>
 #include <asm/kaiser.h>
+#include <asm/nospec-branch.h>
 #include <linux/linkage.h>
 #include <linux/err.h>
 
@@ -53,6 +55,8 @@ ENTRY(entry_SYSENTER_compat)
 	/* Interrupts are off on entry. */
 	SWAPGS_UNSAFE_STACK
 	SWITCH_KERNEL_CR3_NO_STACK
+	pax_enter_kernel_user scratch_reg=%rsp
+
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rsp
 
 	/*
@@ -86,26 +90,32 @@ ENTRY(entry_SYSENTER_compat)
 	pushq	%rdx			/* pt_regs->dx */
 	pushq	%rcx			/* pt_regs->cx */
 	pushq	$-ENOSYS		/* pt_regs->ax */
-	pushq   $0			/* pt_regs->r8  = 0 */
-	xorq	%r8, %r8		/* nospec   r8 */
-	pushq   $0			/* pt_regs->r9  = 0 */
-	xorq	%r9, %r9		/* nospec   r9 */
-	pushq   $0			/* pt_regs->r10 = 0 */
-	xorq	%r10, %r10		/* nospec   r10 */
-	pushq   $0			/* pt_regs->r11 = 0 */
-	xorq	%r11, %r11		/* nospec   r11 */
-	pushq   %rbx                    /* pt_regs->rbx */
+	xorl	%eax, %eax
+	pushq   %rax			/* pt_regs->r8  = 0 */
+	xorl	%r8d, %r8d		/* nospec   r8 */
+	pushq   %rax			/* pt_regs->r9  = 0 */
+	xorl	%r9d, %r9d		/* nospec   r9 */
+	pushq   %rax			/* pt_regs->r10 = 0 */
+	xorl	%r10d, %r10d		/* nospec   r10 */
+	pushq   %rax			/* pt_regs->r11 = 0 */
+	xorl	%r11d, %r11d		/* nospec   r11 */
+	pushq   %rbx			/* pt_regs->rbx */
 	xorl	%ebx, %ebx		/* nospec   rbx */
-	pushq   %rbp                    /* pt_regs->rbp (will be overwritten) */
+	pushq   %rbp			/* pt_regs->rbp (will be overwritten) */
 	xorl	%ebp, %ebp		/* nospec   rbp */
-	pushq   $0			/* pt_regs->r12 = 0 */
-	xorq	%r12, %r12		/* nospec   r12 */
-	pushq   $0			/* pt_regs->r13 = 0 */
-	xorq	%r13, %r13		/* nospec   r13 */
-	pushq   $0			/* pt_regs->r14 = 0 */
-	xorq	%r14, %r14		/* nospec   r14 */
-	pushq   $0			/* pt_regs->r15 = 0 */
-	xorq	%r15, %r15		/* nospec   r15 */
+#ifdef CONFIG_PAX_KERNEXEC_PLUGIN_METHOD_OR
+	pushq   %r12                    /* pt_regs->r12 */
+	/* r12 will be clobbered below by pax_set_fptr_mask */
+#else
+	pushq   %rax                    /* pt_regs->r12 = 0 */
+	xorl	%r12d, %r12d		/* nospec   r12 */
+#endif
+	pushq   %rax			/* pt_regs->r13 = 0 */
+	xorl	%r13d, %r13d		/* nospec   r13 */
+	pushq   %rax			/* pt_regs->r14 = 0 */
+	xorl	%r14d, %r14d		/* nospec   r14 */
+	pushq   %rax			/* pt_regs->r15 = 0 */
+	xorl	%r15d, %r15d		/* nospec   r15 */
 	cld
 
 	/*
@@ -121,9 +131,15 @@ ENTRY(entry_SYSENTER_compat)
 	 * we're keeping that code behind a branch which will predict as
 	 * not-taken and therefore its instructions won't be fetched.
 	 */
-	testl	$X86_EFLAGS_NT, EFLAGS(%rsp)
+	testl	$X86_EFLAGS_NT|X86_EFLAGS_AC|X86_EFLAGS_TF, EFLAGS(%rsp)
 	jnz	sysenter_fix_flags
 sysenter_flags_fixed:
+
+	pax_set_fptr_mask
+
+#ifdef CONFIG_PAX_RANDKSTACK
+	pax_erase_kstack
+#endif
 
 	/*
 	 * User mode is traced as though IRQs are on, and SYSENTER
@@ -177,6 +193,9 @@ ENTRY(entry_SYSCALL_compat)
 
 	/* Stash user ESP and switch to the kernel stack. */
 	movl	%esp, %r8d
+
+	pax_enter_kernel_user scratch_reg=%rsp
+
 	movq	PER_CPU_VAR(cpu_current_top_of_stack), %rsp
 
 	/* Zero-extending 32-bit regs, do not remove */
@@ -194,26 +213,38 @@ ENTRY(entry_SYSCALL_compat)
 	pushq	%rdx			/* pt_regs->dx */
 	pushq	%rbp			/* pt_regs->cx (stashed in bp) */
 	pushq	$-ENOSYS		/* pt_regs->ax */
-	pushq   $0			/* pt_regs->r8  = 0 */
+	xorl    %eax,%eax
+	pushq   %rax                    /* pt_regs->r8  = 0 */
 	xorq	%r8, %r8		/* nospec   r8 */
-	pushq   $0			/* pt_regs->r9  = 0 */
+	pushq   %rax                    /* pt_regs->r9  = 0 */
 	xorq	%r9, %r9		/* nospec   r9 */
-	pushq   $0			/* pt_regs->r10 = 0 */
+	pushq   %rax                    /* pt_regs->r10 = 0 */
 	xorq	%r10, %r10		/* nospec   r10 */
-	pushq   $0			/* pt_regs->r11 = 0 */
+	pushq   %rax                    /* pt_regs->r11 = 0 */
 	xorq	%r11, %r11		/* nospec   r11 */
 	pushq   %rbx                    /* pt_regs->rbx */
 	xorl	%ebx, %ebx		/* nospec   rbx */
 	pushq   %rbp                    /* pt_regs->rbp (will be overwritten) */
 	xorl	%ebp, %ebp		/* nospec   rbp */
-	pushq   $0			/* pt_regs->r12 = 0 */
+#ifdef CONFIG_PAX_KERNEXEC_PLUGIN_METHOD_OR
+	pushq   %r12                    /* pt_regs->r12 */
+	/* r12 will be clobbered below by pax_set_fptr_mask */
+#else
+	pushq   %rax			/* pt_regs->r12 = 0 */
 	xorq	%r12, %r12		/* nospec   r12 */
-	pushq   $0			/* pt_regs->r13 = 0 */
+#endif
+	pushq   %rax                    /* pt_regs->r13 = 0 */
 	xorq	%r13, %r13		/* nospec   r13 */
-	pushq   $0			/* pt_regs->r14 = 0 */
+	pushq   %rax                    /* pt_regs->r14 = 0 */
 	xorq	%r14, %r14		/* nospec   r14 */
-	pushq   $0			/* pt_regs->r15 = 0 */
+	pushq   %rax                    /* pt_regs->r15 = 0 */
 	xorq	%r15, %r15		/* nospec   r15 */
+
+	pax_set_fptr_mask
+
+#ifdef CONFIG_PAX_RANDKSTACK
+	pax_erase_kstack
+#endif
 
 	/*
 	 * User mode is traced as though IRQs are on, and SYSENTER
@@ -229,12 +260,19 @@ ENTRY(entry_SYSCALL_compat)
 
 	/* Opportunistic SYSRET */
 sysret32_from_system_call:
+	pax_randomize_kstack
+	pax_erase_kstack
 	TRACE_IRQS_ON			/* User mode traces as IRQs on. */
 	SWITCH_USER_CR3
 	movq	RBX(%rsp), %rbx		/* pt_regs->rbx */
 	movq	RBP(%rsp), %rbp		/* pt_regs->rbp */
 	movq	EFLAGS(%rsp), %r11	/* pt_regs->flags (in r11) */
 	movq	RIP(%rsp), %rcx		/* pt_regs->ip (in rcx) */
+
+#ifdef CONFIG_PAX_KERNEXEC_PLUGIN_METHOD_OR
+	movq	R12(%rsp), %r12
+#endif
+
 	addq	$RAX, %rsp		/* Skip r8-r15 */
 	popq	%rax			/* pt_regs->rax */
 	popq	%rdx			/* Skip pt_regs->cx */
@@ -257,12 +295,15 @@ sysret32_from_system_call:
 	 * when the system call started, which is already known to user
 	 * code.  We zero R8-R10 to avoid info leaks.
          */
+	movq	RSP-ORIG_RAX(%rsp), %rsp
+
+	pax_exit_kernel_user scratch_reg=%r8
+
 	xorq	%r8, %r8
 	xorq	%r9, %r9
 	xorq	%r10, %r10
-	movq	RSP-ORIG_RAX(%rsp), %rsp
         USERGS_SYSRET32
-END(entry_SYSCALL_compat)
+ENDPROC(entry_SYSCALL_compat)
 
 /*
  * Emulated IA32 system calls via int 0x80.
@@ -305,20 +346,24 @@ ENTRY(entry_INT80_compat)
 
 	/* Construct struct pt_regs on stack (iret frame is already on stack) */
 	pushq	%rax			/* pt_regs->orig_ax */
+
+	/* switch to thread stack expects orig_ax to be pushed */
+	call	switch_to_thread_stack
+
 	pushq	%rdi			/* pt_regs->di */
 	pushq	%rsi			/* pt_regs->si */
 	pushq	%rdx			/* pt_regs->dx */
 	pushq	%rcx			/* pt_regs->cx */
 	pushq	$-ENOSYS		/* pt_regs->ax */
-	pushq   $0			/* pt_regs->r8  = 0 */
-	xorq	%r8, %r8		/* nospec   r8 */
-	pushq   $0			/* pt_regs->r9  = 0 */
-	xorq	%r9, %r9		/* nospec   r9 */
-	pushq   $0			/* pt_regs->r10 = 0 */
-	xorq	%r10, %r10		/* nospec   r10 */
-	pushq   $0			/* pt_regs->r11 = 0 */
-	xorq	%r11, %r11		/* nospec   r11 */
-	pushq   %rbx                    /* pt_regs->rbx */
+	pushq   %r8			/* pt_regs->r8 */
+	xorl	%r8d, %r8d		/* nospec   r8 */
+	pushq   %r9			/* pt_regs->r9 */
+	xorl	%r9d, %r9d		/* nospec   r9 */
+	pushq   %r10			/* pt_regs->r10*/
+	xorl	%r10d, %r10d		/* nospec   r10 */
+	pushq   %r11			/* pt_regs->r11 */
+	xorl	%r11d, %r11d		/* nospec   r11 */
+	pushq   %rbx			/* pt_regs->rbx */
 	xorl	%ebx, %ebx		/* nospec   rbx */
 	pushq   %rbp                    /* pt_regs->rbp */
 	xorl	%ebp, %ebp		/* nospec   rbp */
@@ -332,6 +377,12 @@ ENTRY(entry_INT80_compat)
 	xorq	%r15, %r15		/* nospec   r15 */
 	cld
 
+	pax_set_fptr_mask
+
+#ifdef CONFIG_PAX_RANDKSTACK
+	pax_erase_kstack
+#endif
+
 	/*
 	 * User mode is traced as though IRQs are on, and the interrupt
 	 * gate turned them off.
@@ -343,11 +394,11 @@ ENTRY(entry_INT80_compat)
 .Lsyscall_32_done:
 
 	/* Go back to user mode. */
+	pax_randomize_kstack
+	pax_erase_kstack
 	TRACE_IRQS_ON
-	SWITCH_USER_CR3
-	SWAPGS
-	jmp	restore_regs_and_iret
-END(entry_INT80_compat)
+	jmp	swapgs_restore_regs_and_return_to_usermode
+ENDPROC(entry_INT80_compat)
 
 	ALIGN
 GLOBAL(stub32_clone)

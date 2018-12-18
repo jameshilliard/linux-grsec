@@ -167,6 +167,7 @@ static void destroy_super(struct super_block *s)
 	WARN_ON(!list_empty(&s->s_mounts));
 	kfree(s->s_subtype);
 	kfree(s->s_options);
+	free_prealloced_shrinker(&s->s_shrink);
 	call_rcu(&s->rcu, destroy_super_rcu);
 }
 
@@ -246,6 +247,8 @@ static struct super_block *alloc_super(struct file_system_type *type, int flags)
 	s->s_shrink.count_objects = super_cache_count;
 	s->s_shrink.batch = 1024;
 	s->s_shrink.flags = SHRINKER_NUMA_AWARE | SHRINKER_MEMCG_AWARE;
+	if (prealloc_shrinker(&s->s_shrink))
+		goto fail;
 	return s;
 
 fail:
@@ -348,7 +351,8 @@ EXPORT_SYMBOL(deactivate_super);
  *	called for superblocks not in rundown mode (== ones still on ->fs_supers
  *	of their type), so increment of ->s_count is OK here.
  */
-static int grab_super(struct super_block *s) __releases(sb_lock)
+static int grab_super(struct super_block *s) __releases(&sb_lock);
+static int grab_super(struct super_block *s)
 {
 	s->s_count++;
 	spin_unlock(&sb_lock);
@@ -497,11 +501,7 @@ retry:
 	hlist_add_head(&s->s_instances, &type->fs_supers);
 	spin_unlock(&sb_lock);
 	get_filesystem(type);
-	err = register_shrinker(&s->s_shrink);
-	if (err) {
-		deactivate_locked_super(s);
-		s = ERR_PTR(err);
-	}
+	register_shrinker_prepared(&s->s_shrink);
 	return s;
 }
 

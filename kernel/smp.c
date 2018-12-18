@@ -578,6 +578,26 @@ void __init smp_init(void)
 			cpu_up(cpu);
 	}
 
+#ifdef CONFIG_HOTPLUG_SMT
+	/* Handle nosmt[=force] here */
+	if (cpu_smt_control == CPU_SMT_DISABLED ||
+	    cpu_smt_control == CPU_SMT_FORCE_DISABLED) {
+		int ret;
+
+		cpu_maps_update_begin();
+		for_each_online_cpu(cpu) {
+			if (topology_is_primary_thread(cpu))
+				continue;
+			ret = cpu_down_maps_locked(cpu);
+			if (ret)
+				break;
+		}
+		cpu_maps_update_done();
+	}
+#endif
+
+	/* Final decision about SMT support */
+	cpu_smt_check_topology();
 	/* Any cleanup work */
 	smp_announce();
 	smp_cpus_done(setup_max_cpus);
@@ -588,7 +608,7 @@ void __init smp_init(void)
  * early_boot_irqs_disabled is set.  Use local_irq_save/restore() instead
  * of local_irq_disable/enable().
  */
-int on_each_cpu(void (*func) (void *info), void *info, int wait)
+int on_each_cpu(smp_call_func_t func, void *info, int wait)
 {
 	unsigned long flags;
 	int ret = 0;

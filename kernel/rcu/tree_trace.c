@@ -125,7 +125,7 @@ static void print_one_rcu_data(struct seq_file *m, struct rcu_data *rdp)
 		   rdp->rcu_qs_ctr_snap == per_cpu(rcu_qs_ctr, rdp->cpu),
 		   rdp->core_needs_qs);
 	seq_printf(m, " dt=%d/%llx/%d df=%lu",
-		   atomic_read(&rdp->dynticks->dynticks),
+		   atomic_read_unchecked(&rdp->dynticks->dynticks),
 		   rdp->dynticks->dynticks_nesting,
 		   rdp->dynticks->dynticks_nmi_nesting,
 		   rdp->dynticks_fqs);
@@ -187,12 +187,12 @@ static int show_rcuexp(struct seq_file *m, void *v)
 
 	seq_printf(m, "s=%lu wd0=%lu wd1=%lu wd2=%lu wd3=%lu n=%lu enq=%d sc=%lu\n",
 		   rsp->expedited_sequence,
-		   atomic_long_read(&rsp->expedited_workdone0),
-		   atomic_long_read(&rsp->expedited_workdone1),
-		   atomic_long_read(&rsp->expedited_workdone2),
-		   atomic_long_read(&rsp->expedited_workdone3),
-		   atomic_long_read(&rsp->expedited_normal),
-		   atomic_read(&rsp->expedited_need_qs),
+		   atomic_long_read_unchecked(&rsp->expedited_workdone0),
+		   atomic_long_read_unchecked(&rsp->expedited_workdone1),
+		   atomic_long_read_unchecked(&rsp->expedited_workdone2),
+		   atomic_long_read_unchecked(&rsp->expedited_workdone3),
+		   atomic_long_read_unchecked(&rsp->expedited_normal),
+		   atomic_read_unchecked(&rsp->expedited_need_qs),
 		   rsp->expedited_sequence / 2);
 	return 0;
 }

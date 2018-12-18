@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/nospec.h>
 #include <linux/prctl.h>
+#include <linux/mod_devicetable.h>
 
 #include <asm/spec-ctrl.h>
 #include <asm/cmdline.h>
@@ -21,12 +22,15 @@
 #include <asm/processor-flags.h>
 #include <asm/fpu/internal.h>
 #include <asm/msr.h>
+#include <asm/vmx.h>
 #include <asm/paravirt.h>
 #include <asm/alternative.h>
 #include <asm/pgtable.h>
 #include <asm/cacheflush.h>
 #include <asm/intel-family.h>
 #include <asm/e820.h>
+#include <asm/sections.h>
+#include <asm/cpu_device_id.h>
 
 static void __init spectre_v2_select_mitigation(void);
 static void __init ssb_select_mitigation(void);
@@ -36,25 +40,31 @@ static void __init l1tf_select_mitigation(void);
  * Our boot-time value of the SPEC_CTRL MSR. We read it once so that any
  * writes to SPEC_CTRL contain whatever reserved bits have been set.
  */
-u64 x86_spec_ctrl_base;
+u64 x86_spec_ctrl_base __read_only;
 EXPORT_SYMBOL_GPL(x86_spec_ctrl_base);
 
 /*
  * The vendor and possibly platform specific bits which can be modified in
  * x86_spec_ctrl_base.
  */
-static u64 x86_spec_ctrl_mask = SPEC_CTRL_IBRS;
+static u64 x86_spec_ctrl_mask __read_only = SPEC_CTRL_IBRS;
 
 /*
  * AMD specific MSR info for Speculative Store Bypass control.
  * x86_amd_ls_cfg_ssbd_mask is initialized in identify_boot_cpu().
  */
-u64 x86_amd_ls_cfg_base;
-u64 x86_amd_ls_cfg_ssbd_mask;
+u64 x86_amd_ls_cfg_base __read_only;
+u64 x86_amd_ls_cfg_ssbd_mask __read_only;
 
 void __init check_bugs(void)
 {
 	identify_boot_cpu();
+
+	/*
+	 * identify_boot_cpu() initialized SMT support information, let the
+	 * core code know.
+	 */
+	cpu_smt_check_topology_early();
 
 	if (!IS_ENABLED(CONFIG_SMP)) {
 		pr_info("CPU: ");
@@ -101,6 +111,7 @@ void __init check_bugs(void)
 
 	fpu__init_check_bugs();
 #else /* CONFIG_X86_64 */
+	set_memory_nx((unsigned long)_sinitdata, (__START_KERNEL_map + KERNEL_IMAGE_SIZE - (unsigned long)_sinitdata) >> PAGE_SHIFT);
 	alternative_instructions();
 
 	/*
@@ -126,18 +137,20 @@ enum spectre_v2_mitigation_cmd {
 	SPECTRE_V2_CMD_RETPOLINE_AMD,
 };
 
-static const char *spectre_v2_strings[] = {
+static const char * const spectre_v2_strings[] = {
 	[SPECTRE_V2_NONE]			= "Vulnerable",
 	[SPECTRE_V2_RETPOLINE_MINIMAL]		= "Vulnerable: Minimal generic ASM retpoline",
 	[SPECTRE_V2_RETPOLINE_MINIMAL_AMD]	= "Vulnerable: Minimal AMD ASM retpoline",
-	[SPECTRE_V2_RETPOLINE_GENERIC]		= "Mitigation: Full generic retpoline",
-	[SPECTRE_V2_RETPOLINE_AMD]		= "Mitigation: Full AMD retpoline",
+	[SPECTRE_V2_RETPOLINE_GENERIC]		= "Mitigation: Full generic retpoline (performance optimized)",
+	[SPECTRE_V2_RETPOLINE_AMD]		= "Mitigation: Full AMD retpoline (performance optimized)",
+	[SPECTRE_V2_IBRS_ENHANCED]		= "Mitigation: Enhanced IBRS",
 };
 
 #undef pr_fmt
 #define pr_fmt(fmt)     "Spectre V2 : " fmt
 
-static enum spectre_v2_mitigation spectre_v2_enabled = SPECTRE_V2_NONE;
+static enum spectre_v2_mitigation spectre_v2_enabled __read_only =
+	SPECTRE_V2_NONE;
 
 void
 x86_virt_spec_ctrl(u64 guest_spec_ctrl, u64 guest_virt_spec_ctrl, bool setguest)
@@ -332,6 +345,13 @@ static void __init spectre_v2_select_mitigation(void)
 
 	case SPECTRE_V2_CMD_FORCE:
 	case SPECTRE_V2_CMD_AUTO:
+		if (boot_cpu_has(X86_FEATURE_IBRS_ENHANCED)) {
+			mode = SPECTRE_V2_IBRS_ENHANCED;
+			/* Force it so VMEXIT will restore correctly */
+			x86_spec_ctrl_base |= SPEC_CTRL_IBRS;
+			wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
+			goto specv2_set_mode;
+		}
 		if (IS_ENABLED(CONFIG_RETPOLINE))
 			goto retpoline_auto;
 		break;
@@ -369,6 +389,7 @@ retpoline_auto:
 		setup_force_cpu_cap(X86_FEATURE_RETPOLINE);
 	}
 
+specv2_set_mode:
 	spectre_v2_enabled = mode;
 	pr_info("%s\n", spectre_v2_strings[mode]);
 
@@ -391,9 +412,16 @@ retpoline_auto:
 
 	/*
 	 * Retpoline means the kernel is safe because it has no indirect
-	 * branches. But firmware isn't, so use IBRS to protect that.
+	 * branches. Enhanced IBRS protects firmware too, so, enable restricted
+	 * speculation around firmware calls only when Enhanced IBRS isn't
+	 * supported.
+	 *
+	 * Use "mode" to check Enhanced IBRS instead of boot_cpu_has(), because
+	 * the user might select retpoline on the kernel command line and if
+	 * the CPU supports Enhanced IBRS, kernel might un-intentionally not
+	 * enable IBRS around firmware calls.
 	 */
-	if (boot_cpu_has(X86_FEATURE_IBRS)) {
+	if (boot_cpu_has(X86_FEATURE_IBRS) && mode != SPECTRE_V2_IBRS_ENHANCED) {
 		setup_force_cpu_cap(X86_FEATURE_USE_IBRS_FW);
 		pr_info("Enabling Restricted Speculation for firmware calls\n");
 	}
@@ -402,7 +430,7 @@ retpoline_auto:
 #undef pr_fmt
 #define pr_fmt(fmt)	"Speculative Store Bypass: " fmt
 
-static enum ssb_mitigation ssb_mode = SPEC_STORE_BYPASS_NONE;
+static enum ssb_mitigation ssb_mode __read_only = SPEC_STORE_BYPASS_NONE;
 
 /* The kernel command line selection */
 enum ssb_mitigation_cmd {
@@ -507,18 +535,15 @@ static enum ssb_mitigation __init __ssb_select_mitigation(void)
 	if (mode == SPEC_STORE_BYPASS_DISABLE) {
 		setup_force_cpu_cap(X86_FEATURE_SPEC_STORE_BYPASS_DISABLE);
 		/*
-		 * Intel uses the SPEC CTRL MSR Bit(2) for this, while AMD uses
-		 * a completely different MSR and bit dependent on family.
+		 * Intel uses the SPEC CTRL MSR Bit(2) for this, while AMD may
+		 * use a completely different MSR and bit dependent on family.
 		 */
-		switch (boot_cpu_data.x86_vendor) {
-		case X86_VENDOR_INTEL:
+		if (!static_cpu_has(X86_FEATURE_MSR_SPEC_CTRL))
+			x86_amd_ssb_disable();
+		else {
 			x86_spec_ctrl_base |= SPEC_CTRL_SSBD;
 			x86_spec_ctrl_mask |= SPEC_CTRL_SSBD;
 			wrmsrl(MSR_IA32_SPEC_CTRL, x86_spec_ctrl_base);
-			break;
-		case X86_VENDOR_AMD:
-			x86_amd_ssb_disable();
-			break;
 		}
 	}
 
@@ -635,6 +660,14 @@ void x86_spec_ctrl_setup_ap(void)
 #undef pr_fmt
 #define pr_fmt(fmt)	"L1TF: " fmt
 
+/* Default mitigation for L1TF-affected CPUs */
+enum l1tf_mitigations l1tf_mitigation __read_only = L1TF_MITIGATION_FLUSH;
+#if IS_ENABLED(CONFIG_KVM_INTEL)
+EXPORT_SYMBOL_GPL(l1tf_mitigation);
+#endif
+enum vmx_l1d_flush_state l1tf_vmx_mitigation = VMENTER_L1D_FLUSH_AUTO;
+EXPORT_SYMBOL_GPL(l1tf_vmx_mitigation);
+
 /*
  * These CPUs all support 44bits physical address space internally in the
  * cache but CPUID can report a smaller number of physical address bits.
@@ -683,6 +716,20 @@ static void __init l1tf_select_mitigation(void)
 
 	override_cache_bits(&boot_cpu_data);
 
+	switch (l1tf_mitigation) {
+	case L1TF_MITIGATION_OFF:
+	case L1TF_MITIGATION_FLUSH_NOWARN:
+	case L1TF_MITIGATION_FLUSH:
+		break;
+	case L1TF_MITIGATION_FLUSH_NOSMT:
+	case L1TF_MITIGATION_FULL:
+		cpu_smt_disable(false);
+		break;
+	case L1TF_MITIGATION_FULL_FORCE:
+		cpu_smt_disable(true);
+		break;
+	}
+
 #if CONFIG_PGTABLE_LEVELS == 2
 	pr_warn("Kernel not compiled for PAE. No mitigation for L1TF\n");
 	return;
@@ -700,9 +747,79 @@ static void __init l1tf_select_mitigation(void)
 
 	setup_force_cpu_cap(X86_FEATURE_L1TF_PTEINV);
 }
+
+static int __init l1tf_cmdline(char *str)
+{
+	if (!boot_cpu_has_bug(X86_BUG_L1TF))
+		return 0;
+
+	if (!str)
+		return -EINVAL;
+
+	if (!strcmp(str, "off"))
+		l1tf_mitigation = L1TF_MITIGATION_OFF;
+	else if (!strcmp(str, "flush,nowarn"))
+		l1tf_mitigation = L1TF_MITIGATION_FLUSH_NOWARN;
+	else if (!strcmp(str, "flush"))
+		l1tf_mitigation = L1TF_MITIGATION_FLUSH;
+	else if (!strcmp(str, "flush,nosmt"))
+		l1tf_mitigation = L1TF_MITIGATION_FLUSH_NOSMT;
+	else if (!strcmp(str, "full"))
+		l1tf_mitigation = L1TF_MITIGATION_FULL;
+	else if (!strcmp(str, "full,force"))
+		l1tf_mitigation = L1TF_MITIGATION_FULL_FORCE;
+
+	return 0;
+}
+early_param("l1tf", l1tf_cmdline);
+
 #undef pr_fmt
 
 #ifdef CONFIG_SYSFS
+
+#ifdef CONFIG_X86_32
+static const struct x86_cpu_id cpu_spec_unfixable_segment_limit_bypass[] = {
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE2_MEROM		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE2_MEROM_L	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE2_PENRYN		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE2_DUNNINGTON	},
+	{}
+};
+#endif
+
+#define L1TF_DEFAULT_MSG "Mitigation: PTE Inversion"
+
+#if IS_ENABLED(CONFIG_KVM_INTEL)
+static const char *l1tf_vmx_states[] = {
+	[VMENTER_L1D_FLUSH_AUTO]		= "auto",
+	[VMENTER_L1D_FLUSH_NEVER]		= "vulnerable",
+	[VMENTER_L1D_FLUSH_COND]		= "conditional cache flushes",
+	[VMENTER_L1D_FLUSH_ALWAYS]		= "cache flushes",
+	[VMENTER_L1D_FLUSH_EPT_DISABLED]	= "EPT disabled",
+	[VMENTER_L1D_FLUSH_NOT_REQUIRED]	= "flush not necessary"
+};
+
+static ssize_t l1tf_show_state(char *buf)
+{
+	if (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_AUTO)
+		return sprintf(buf, "%s\n", L1TF_DEFAULT_MSG);
+
+	if (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_EPT_DISABLED ||
+	    (l1tf_vmx_mitigation == VMENTER_L1D_FLUSH_NEVER &&
+	     cpu_smt_control == CPU_SMT_ENABLED))
+		return sprintf(buf, "%s; VMX: %s\n", L1TF_DEFAULT_MSG,
+			       l1tf_vmx_states[l1tf_vmx_mitigation]);
+
+	return sprintf(buf, "%s; VMX: %s, SMT %s\n", L1TF_DEFAULT_MSG,
+		       l1tf_vmx_states[l1tf_vmx_mitigation],
+		       cpu_smt_control == CPU_SMT_ENABLED ? "vulnerable" : "disabled");
+}
+#else
+static ssize_t l1tf_show_state(char *buf)
+{
+	return sprintf(buf, "%s\n", L1TF_DEFAULT_MSG);
+}
+#endif
 
 static ssize_t cpu_show_common(struct device *dev, struct device_attribute *attr,
 			       char *buf, unsigned int bug)
@@ -714,6 +831,18 @@ static ssize_t cpu_show_common(struct device *dev, struct device_attribute *attr
 	case X86_BUG_CPU_MELTDOWN:
 		if (boot_cpu_has(X86_FEATURE_KAISER))
 			return sprintf(buf, "Mitigation: PTI\n");
+		if (boot_cpu_has(X86_FEATURE_UDEREF)) {
+#ifdef CONFIG_X86_32
+			if (x86_match_cpu(cpu_spec_unfixable_segment_limit_bypass))
+				return sprintf(buf, "Vulnerable (unfixable speculative segment limit bypass)\n");
+			if (boot_cpu_has(X86_BUG_SPEC_SEGMENT_LIMIT_BYPASS))
+				return sprintf(buf, "Mitigation: PAX_UDEREF (segment limits + uTLB flush)\n");
+			else
+				return sprintf(buf, "Mitigation: PAX_UDEREF (segment limits)\n");
+#else
+			return sprintf(buf, "Mitigation: PAX_UDEREF (pgd switching)\n");
+#endif
+		}
 
 		break;
 
@@ -731,9 +860,8 @@ static ssize_t cpu_show_common(struct device *dev, struct device_attribute *attr
 
 	case X86_BUG_L1TF:
 		if (boot_cpu_has(X86_FEATURE_L1TF_PTEINV))
-			return sprintf(buf, "Mitigation: Page Table Inversion\n");
+			return l1tf_show_state(buf);
 		break;
-
 	default:
 		break;
 	}
@@ -741,12 +869,14 @@ static ssize_t cpu_show_common(struct device *dev, struct device_attribute *attr
 	return sprintf(buf, "Vulnerable\n");
 }
 
-ssize_t cpu_show_meltdown(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t cpu_show_meltdown(struct device *dev,
+			  struct device_attribute *attr, char *buf)
 {
 	return cpu_show_common(dev, attr, buf, X86_BUG_CPU_MELTDOWN);
 }
 
-ssize_t cpu_show_spectre_v1(struct device *dev, struct device_attribute *attr, char *buf)
+ssize_t cpu_show_spectre_v1(struct device *dev,
+			    struct device_attribute *attr, char *buf)
 {
 	return cpu_show_common(dev, attr, buf, X86_BUG_SPECTRE_V1);
 }

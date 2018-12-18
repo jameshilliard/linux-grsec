@@ -10,6 +10,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .data
 .align 32

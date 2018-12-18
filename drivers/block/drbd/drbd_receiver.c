@@ -871,7 +871,7 @@ int drbd_connected(struct drbd_peer_device *peer_device)
 	struct drbd_device *device = peer_device->device;
 	int err;
 
-	atomic_set(&device->packet_seq, 0);
+	atomic_set_unchecked(&device->packet_seq, 0);
 	device->peer_seq = 0;
 
 	device->state_mutex = peer_device->connection->agreed_pro_version < 100 ?
@@ -1234,7 +1234,7 @@ static enum finish_epoch drbd_may_finish_epoch(struct drbd_connection *connectio
 	do {
 		next_epoch = NULL;
 
-		epoch_size = atomic_read(&epoch->epoch_size);
+		epoch_size = atomic_read_unchecked(&epoch->epoch_size);
 
 		switch (ev & ~EV_CLEANUP) {
 		case EV_PUT:
@@ -1274,7 +1274,7 @@ static enum finish_epoch drbd_may_finish_epoch(struct drbd_connection *connectio
 					rv = FE_DESTROYED;
 			} else {
 				epoch->flags = 0;
-				atomic_set(&epoch->epoch_size, 0);
+				atomic_set_unchecked(&epoch->epoch_size, 0);
 				/* atomic_set(&epoch->active, 0); is already zero */
 				if (rv == FE_STILL_LIVE)
 					rv = FE_RECYCLED;
@@ -1551,7 +1551,7 @@ static int receive_Barrier(struct drbd_connection *connection, struct packet_inf
 		conn_wait_active_ee_empty(connection);
 		drbd_flush(connection);
 
-		if (atomic_read(&connection->current_epoch->epoch_size)) {
+		if (atomic_read_unchecked(&connection->current_epoch->epoch_size)) {
 			epoch = kmalloc(sizeof(struct drbd_epoch), GFP_NOIO);
 			if (epoch)
 				break;
@@ -1565,11 +1565,11 @@ static int receive_Barrier(struct drbd_connection *connection, struct packet_inf
 	}
 
 	epoch->flags = 0;
-	atomic_set(&epoch->epoch_size, 0);
+	atomic_set_unchecked(&epoch->epoch_size, 0);
 	atomic_set(&epoch->active, 0);
 
 	spin_lock(&connection->epoch_lock);
-	if (atomic_read(&connection->current_epoch->epoch_size)) {
+	if (atomic_read_unchecked(&connection->current_epoch->epoch_size)) {
 		list_add(&epoch->list, &connection->current_epoch->list);
 		connection->current_epoch = epoch;
 		connection->epochs++;
@@ -1781,7 +1781,9 @@ static int e_end_resync_block(struct drbd_work *w, int unused)
 }
 
 static int recv_resync_read(struct drbd_peer_device *peer_device, sector_t sector,
-			    struct packet_info *pi) __releases(local)
+			    struct packet_info *pi) __releases(local);
+static int recv_resync_read(struct drbd_peer_device *peer_device, sector_t sector,
+			    struct packet_info *pi)
 {
 	struct drbd_device *device = peer_device->device;
 	struct drbd_peer_request *peer_req;
@@ -1803,7 +1805,7 @@ static int recv_resync_read(struct drbd_peer_device *peer_device, sector_t secto
 	list_add_tail(&peer_req->w.list, &device->sync_ee);
 	spin_unlock_irq(&device->resource->req_lock);
 
-	atomic_add(pi->size >> 9, &device->rs_sect_ev);
+	atomic_add_unchecked(pi->size >> 9, &device->rs_sect_ev);
 	if (drbd_submit_peer_request(device, peer_req, WRITE, DRBD_FAULT_RS_WR) == 0)
 		return 0;
 
@@ -1901,7 +1903,7 @@ static int receive_RSDataReply(struct drbd_connection *connection, struct packet
 		drbd_send_ack_dp(peer_device, P_NEG_ACK, p, pi->size);
 	}
 
-	atomic_add(pi->size >> 9, &device->rs_sect_in);
+	atomic_add_unchecked(pi->size >> 9, &device->rs_sect_in);
 
 	return err;
 }
@@ -2291,7 +2293,7 @@ static int receive_Data(struct drbd_connection *connection, struct packet_info *
 
 		err = wait_for_and_update_peer_seq(peer_device, peer_seq);
 		drbd_send_ack_dp(peer_device, P_NEG_ACK, p, pi->size);
-		atomic_inc(&connection->current_epoch->epoch_size);
+		atomic_inc_unchecked(&connection->current_epoch->epoch_size);
 		err2 = drbd_drain_block(peer_device, pi->size);
 		if (!err)
 			err = err2;
@@ -2335,7 +2337,7 @@ static int receive_Data(struct drbd_connection *connection, struct packet_info *
 
 	spin_lock(&connection->epoch_lock);
 	peer_req->epoch = connection->current_epoch;
-	atomic_inc(&peer_req->epoch->epoch_size);
+	atomic_inc_unchecked(&peer_req->epoch->epoch_size);
 	atomic_inc(&peer_req->epoch->active);
 	spin_unlock(&connection->epoch_lock);
 
@@ -2480,7 +2482,7 @@ bool drbd_rs_c_min_rate_throttle(struct drbd_device *device)
 
 	curr_events = (int)part_stat_read(&disk->part0, sectors[0]) +
 		      (int)part_stat_read(&disk->part0, sectors[1]) -
-			atomic_read(&device->rs_sect_ev);
+			atomic_read_unchecked(&device->rs_sect_ev);
 
 	if (atomic_read(&device->ap_actlog_cnt)
 	    || curr_events - device->rs_last_events > 64) {
@@ -2619,7 +2621,7 @@ static int receive_DataRequest(struct drbd_connection *connection, struct packet
 			device->use_csums = true;
 		} else if (pi->cmd == P_OV_REPLY) {
 			/* track progress, we may need to throttle */
-			atomic_add(size >> 9, &device->rs_sect_in);
+			atomic_add_unchecked(size >> 9, &device->rs_sect_in);
 			peer_req->w.cb = w_e_end_ov_reply;
 			dec_rs_pending(device);
 			/* drbd_rs_begin_io done when we sent this request,
@@ -2692,7 +2694,7 @@ static int receive_DataRequest(struct drbd_connection *connection, struct packet
 		goto out_free_e;
 
 submit_for_resync:
-	atomic_add(size >> 9, &device->rs_sect_ev);
+	atomic_add_unchecked(size >> 9, &device->rs_sect_ev);
 
 submit:
 	update_receiver_timing_details(connection, drbd_submit_peer_request);
@@ -4565,7 +4567,7 @@ struct data_cmd {
 	int expect_payload;
 	size_t pkt_size;
 	int (*fn)(struct drbd_connection *, struct packet_info *);
-};
+} __do_const;
 
 static struct data_cmd drbd_cmd_handler[] = {
 	[P_DATA]	    = { 1, sizeof(struct p_data), receive_Data },
@@ -4679,7 +4681,7 @@ static void conn_disconnect(struct drbd_connection *connection)
 	if (!list_empty(&connection->current_epoch->list))
 		drbd_err(connection, "ASSERTION FAILED: connection->current_epoch->list not empty\n");
 	/* ok, no more ee's on the fly, it is safe to reset the epoch_size */
-	atomic_set(&connection->current_epoch->epoch_size, 0);
+	atomic_set_unchecked(&connection->current_epoch->epoch_size, 0);
 	connection->send.seen_any_write_yet = false;
 
 	drbd_info(connection, "Connection closed\n");
@@ -5183,7 +5185,7 @@ static int got_IsInSync(struct drbd_connection *connection, struct packet_info *
 		put_ldev(device);
 	}
 	dec_rs_pending(device);
-	atomic_add(blksize >> 9, &device->rs_sect_in);
+	atomic_add_unchecked(blksize >> 9, &device->rs_sect_in);
 
 	return 0;
 }
@@ -5471,7 +5473,7 @@ static int connection_finish_peer_reqs(struct drbd_connection *connection)
 struct asender_cmd {
 	size_t pkt_size;
 	int (*fn)(struct drbd_connection *connection, struct packet_info *);
-};
+} __do_const;
 
 static struct asender_cmd asender_tbl[] = {
 	[P_PING]	    = { 0, got_Ping },

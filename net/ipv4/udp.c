@@ -87,6 +87,7 @@
 #include <linux/types.h>
 #include <linux/fcntl.h>
 #include <linux/module.h>
+#include <linux/security.h>
 #include <linux/socket.h>
 #include <linux/sockios.h>
 #include <linux/igmp.h>
@@ -113,6 +114,10 @@
 #include <trace/events/skb.h>
 #include <net/busy_poll.h>
 #include "udp_impl.h"
+
+#ifdef CONFIG_GRKERNSEC_BLACKHOLE
+extern int grsec_enable_blackhole;
+#endif
 
 struct udp_table udp_table __read_mostly;
 EXPORT_SYMBOL(udp_table);
@@ -611,6 +616,9 @@ static inline bool __udp_is_mcast_sock(struct net *net, struct sock *sk,
 	return true;
 }
 
+extern int gr_search_udp_recvmsg(struct sock *sk, const struct sk_buff *skb);
+extern int gr_search_udp_sendmsg(struct sock *sk, struct sockaddr_in *addr);
+
 /*
  * This routine is called by the ICMP module when it gets some
  * sort of error condition.  If err < 0 then the socket should
@@ -947,9 +955,18 @@ int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		dport = usin->sin_port;
 		if (dport == 0)
 			return -EINVAL;
+
+		err = gr_search_udp_sendmsg(sk, usin);
+		if (err)
+			return err;
 	} else {
 		if (sk->sk_state != TCP_ESTABLISHED)
 			return -EDESTADDRREQ;
+
+		err = gr_search_udp_sendmsg(sk, NULL);
+		if (err)
+			return err;
+
 		daddr = inet->inet_daddr;
 		dport = inet->inet_dport;
 		/* Open fast path for connected socket.
@@ -1209,7 +1226,7 @@ static unsigned int first_packet_length(struct sock *sk)
 				 IS_UDPLITE(sk));
 		UDP_INC_STATS_BH(sock_net(sk), UDP_MIB_INERRORS,
 				 IS_UDPLITE(sk));
-		atomic_inc(&sk->sk_drops);
+		atomic_inc_unchecked(&sk->sk_drops);
 		__skb_unlink(skb, rcvq);
 		__skb_queue_tail(&list_kill, skb);
 	}
@@ -1290,6 +1307,10 @@ try_again:
 	if (!skb)
 		goto out;
 
+	err = gr_search_udp_recvmsg(sk, skb);
+	if (err)
+		goto out_free;
+
 	ulen = skb->len - sizeof(struct udphdr);
 	copied = len;
 	if (copied > ulen)
@@ -1323,7 +1344,7 @@ try_again:
 	if (unlikely(err)) {
 		trace_kfree_skb(skb, udp_recvmsg);
 		if (!peeked) {
-			atomic_inc(&sk->sk_drops);
+			atomic_inc_unchecked(&sk->sk_drops);
 			UDP_INC_STATS_USER(sock_net(sk),
 					   UDP_MIB_INERRORS, is_udplite);
 		}
@@ -1370,7 +1391,7 @@ csum_copy_err:
 	goto try_again;
 }
 
-int udp_disconnect(struct sock *sk, int flags)
+int __udp_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	/*
@@ -1390,6 +1411,15 @@ int udp_disconnect(struct sock *sk, int flags)
 		inet->inet_sport = 0;
 	}
 	sk_dst_reset(sk);
+	return 0;
+}
+EXPORT_SYMBOL(__udp_disconnect);
+
+int udp_disconnect(struct sock *sk, int flags)
+{
+	lock_sock(sk);
+	__udp_disconnect(sk, flags);
+	release_sock(sk);
 	return 0;
 }
 EXPORT_SYMBOL(udp_disconnect);
@@ -1463,7 +1493,7 @@ static void udp_v4_rehash(struct sock *sk)
 	udp_lib_rehash(sk, new_hash);
 }
 
-static int __udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
+int __udp_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
 	int rc;
 
@@ -1617,7 +1647,7 @@ csum_error:
 	UDP_INC_STATS_BH(sock_net(sk), UDP_MIB_CSUMERRORS, is_udplite);
 drop:
 	UDP_INC_STATS_BH(sock_net(sk), UDP_MIB_INERRORS, is_udplite);
-	atomic_inc(&sk->sk_drops);
+	atomic_inc_unchecked(&sk->sk_drops);
 	kfree_skb(skb);
 	return -1;
 }
@@ -1635,7 +1665,7 @@ static void flush_stack(struct sock **stack, unsigned int count,
 			skb1 = (i == final) ? skb : skb_clone(skb, GFP_ATOMIC);
 
 		if (!skb1) {
-			atomic_inc(&sk->sk_drops);
+			atomic_inc_unchecked(&sk->sk_drops);
 			UDP_INC_STATS_BH(sock_net(sk), UDP_MIB_RCVBUFERRORS,
 					 IS_UDPLITE(sk));
 			UDP_INC_STATS_BH(sock_net(sk), UDP_MIB_INERRORS,
@@ -1846,6 +1876,9 @@ int __udp4_lib_rcv(struct sk_buff *skb, struct udp_table *udptable,
 		goto csum_error;
 
 	UDP_INC_STATS_BH(net, UDP_MIB_NOPORTS, proto == IPPROTO_UDPLITE);
+#ifdef CONFIG_GRKERNSEC_BLACKHOLE
+	if (!grsec_enable_blackhole || (skb->dev->flags & IFF_LOOPBACK))
+#endif
 	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 
 	/*
@@ -2454,7 +2487,7 @@ static void udp4_format_sock(struct sock *sp, struct seq_file *f,
 		from_kuid_munged(seq_user_ns(f), sock_i_uid(sp)),
 		0, sock_i_ino(sp),
 		atomic_read(&sp->sk_refcnt), sp,
-		atomic_read(&sp->sk_drops));
+		atomic_read_unchecked(&sp->sk_drops));
 }
 
 int udp4_seq_show(struct seq_file *seq, void *v)

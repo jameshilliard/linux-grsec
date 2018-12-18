@@ -46,6 +46,8 @@
 #include <linux/mutex.h>
 #include <linux/slab.h>
 
+#include <linux/nospec.h>
+
 #include <asm/uaccess.h>
 
 #include <rdma/ib.h>
@@ -920,14 +922,14 @@ static ssize_t ib_ucm_send_rej(struct ib_ucm_file *file,
 			       const char __user *inbuf,
 			       int in_len, int out_len)
 {
-	return ib_ucm_send_info(file, inbuf, in_len, (void *)ib_send_cm_rej);
+	return ib_ucm_send_info(file, inbuf, in_len, ib_send_cm_rej);
 }
 
 static ssize_t ib_ucm_send_apr(struct ib_ucm_file *file,
 			       const char __user *inbuf,
 			       int in_len, int out_len)
 {
-	return ib_ucm_send_info(file, inbuf, in_len, (void *)ib_send_cm_apr);
+	return ib_ucm_send_info(file, inbuf, in_len, ib_send_cm_apr);
 }
 
 static ssize_t ib_ucm_send_mra(struct ib_ucm_file *file,
@@ -1115,6 +1117,7 @@ static ssize_t ib_ucm_write(struct file *filp, const char __user *buf,
 
 	if (hdr.cmd >= ARRAY_SIZE(ucm_cmd_table))
 		return -EINVAL;
+	hdr.cmd = array_index_nospec(hdr.cmd, ARRAY_SIZE(ucm_cmd_table));
 
 	if (hdr.in + sizeof(hdr) > len)
 		return -EINVAL;

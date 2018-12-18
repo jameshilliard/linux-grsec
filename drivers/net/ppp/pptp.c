@@ -165,7 +165,6 @@ static void del_chan(struct pppox_sock *sock)
 	clear_bit(sock->proto.pptp.src_addr.call_id, callid_bitmap);
 	RCU_INIT_POINTER(callid_sock[sock->proto.pptp.src_addr.call_id], NULL);
 	spin_unlock(&chan_lock);
-	synchronize_rcu();
 }
 
 static int pptp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
@@ -368,7 +367,7 @@ allow_packet:
 		}
 
 		skb->ip_summed = CHECKSUM_NONE;
-		skb_set_network_header(skb, skb->head-skb->data);
+		skb->network_header = 0;
 		ppp_input(&po->chan, skb);
 
 		return NET_RX_SUCCESS;
@@ -557,6 +556,7 @@ static int pptp_release(struct socket *sock)
 	po = pppox_sk(sk);
 	opt = &po->proto.pptp;
 	del_chan(po);
+	synchronize_rcu();
 
 	pppox_unbind_sock(sk);
 	sk->sk_state = PPPOX_DEAD;

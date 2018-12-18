@@ -108,6 +108,9 @@ MODULE_DEVICE_TABLE(usb, ftdi_elan_table);
  */
 #define USB_FTDI_ELAN_MINOR_BASE 192
 #define COMMAND_BITS 5
+#ifdef COMMAND_SIZE
+#undef COMMAND_SIZE
+#endif
 #define COMMAND_SIZE (1<<COMMAND_BITS)
 #define COMMAND_MASK (COMMAND_SIZE-1)
 struct u132_command {

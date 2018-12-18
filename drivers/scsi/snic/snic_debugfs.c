@@ -247,7 +247,7 @@ snic_stats_show(struct seq_file *sfp, void *data)
 	for (i = 0; i < SNIC_MAX_SG_DESC_CNT; i++) {
 		seq_printf(sfp,
 			   "%10lld ",
-			   (u64) atomic64_read(&stats->io.sgl_cnt[i]));
+			   (u64) atomic64_read_unchecked(&stats->io.sgl_cnt[i]));
 
 		if ((i + 1) % 8 == 0)
 			seq_puts(sfp, "\n");

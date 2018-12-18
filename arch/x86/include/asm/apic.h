@@ -11,6 +11,7 @@
 #include <asm/fixmap.h>
 #include <asm/mpspec.h>
 #include <asm/msr.h>
+#include <asm/hardirq.h>
 #include <asm/idle.h>
 
 #define ARCH_APICTIMER_STOPS_ON_C3	1
@@ -44,7 +45,7 @@ static inline void generic_apic_probe(void)
 
 #ifdef CONFIG_X86_LOCAL_APIC
 
-extern unsigned int apic_verbosity;
+extern int apic_verbosity;
 extern int local_apic_timer_c2_ok;
 
 extern int disable_apic;
@@ -626,12 +627,20 @@ extern int default_check_phys_apicid_present(int phys_apicid);
 #endif
 
 #endif /* CONFIG_X86_LOCAL_APIC */
+
+#ifdef CONFIG_SMP
+bool apic_id_is_primary_thread(unsigned int id);
+#else
+static inline bool apic_id_is_primary_thread(unsigned int id) { return false; }
+#endif
+
 extern void irq_enter(void);
 extern void irq_exit(void);
 
 static inline void entering_irq(void)
 {
 	irq_enter();
+	kvm_set_cpu_l1tf_flush_l1d();
 	exit_idle();
 }
 
@@ -643,8 +652,9 @@ static inline void entering_ack_irq(void)
 
 static inline void ipi_entering_ack_irq(void)
 {
-	ack_APIC_irq();
 	irq_enter();
+	ack_APIC_irq();
+	kvm_set_cpu_l1tf_flush_l1d();
 }
 
 static inline void exiting_irq(void)
@@ -654,9 +664,8 @@ static inline void exiting_irq(void)
 
 static inline void exiting_ack_irq(void)
 {
-	irq_exit();
-	/* Ack only at the end to avoid potential reentry */
 	ack_APIC_irq();
+	irq_exit();
 }
 
 extern void ioapic_zap_locks(void);

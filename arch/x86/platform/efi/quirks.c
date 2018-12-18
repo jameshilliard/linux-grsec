@@ -9,6 +9,7 @@
 #include <linux/bootmem.h>
 #include <linux/acpi.h>
 #include <asm/efi.h>
+#include <asm/sections.h>
 #include <asm/uv/uv.h>
 
 #define EFI_MIN_RESERVE 5120

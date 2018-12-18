@@ -16,6 +16,7 @@
 #include <asm/sigframe.h>
 #include <asm/bootparam.h>
 #include <asm/suspend.h>
+#include <asm/tlbflush.h>
 
 #ifdef CONFIG_XEN
 #include <xen/interface/xen.h>
@@ -32,6 +33,8 @@ void common(void) {
 	OFFSET(TI_flags, thread_info, flags);
 	OFFSET(TI_status, thread_info, status);
 	OFFSET(TI_addr_limit, thread_info, addr_limit);
+	OFFSET(TI_lowest_stack, thread_info, lowest_stack);
+	DEFINE(TI_task_thread_sp0, offsetof(struct task_struct, thread.sp0) - offsetof(struct task_struct, tinfo));
 
 	BLANK();
 	OFFSET(crypto_tfm_ctx_offset, crypto_tfm, __crt_ctx);
@@ -70,7 +73,22 @@ void common(void) {
 #endif
 	OFFSET(PV_CPU_read_cr0, pv_cpu_ops, read_cr0);
 	OFFSET(PV_MMU_read_cr2, pv_mmu_ops, read_cr2);
+
+#ifdef CONFIG_PAX_KERNEXEC
+	OFFSET(PV_CPU_write_cr0, pv_cpu_ops, write_cr0);
 #endif
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	OFFSET(PV_MMU_read_cr3, pv_mmu_ops, read_cr3);
+	OFFSET(PV_MMU_write_cr3, pv_mmu_ops, write_cr3);
+#endif
+
+#endif
+
+	BLANK();
+	DEFINE(PAGE_SIZE_asm, PAGE_SIZE);
+	DEFINE(PAGE_SHIFT_asm, PAGE_SHIFT);
+	DEFINE(THREAD_SIZE_asm, THREAD_SIZE);
 
 #ifdef CONFIG_XEN
 	BLANK();
@@ -89,4 +107,11 @@ void common(void) {
 
 	BLANK();
 	DEFINE(PTREGS_SIZE, sizeof(struct pt_regs));
+	DEFINE(TSS_size, sizeof(struct tss_struct));
+
+	/* Layout info for cpu_entry_area */
+	OFFSET(CPU_ENTRY_AREA_tss, cpu_entry_area, tss);
+	OFFSET(CPU_ENTRY_AREA_entry_trampoline, cpu_entry_area, entry_trampoline);
+	OFFSET(CPU_ENTRY_AREA_entry_stack, cpu_entry_area, entry_stack_page);
+	DEFINE(SIZEOF_entry_stack, sizeof(struct entry_stack));
 }

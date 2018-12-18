@@ -30,6 +30,7 @@
 #include <linux/module.h>
 #include <linux/ktime.h>
 #include <net/genetlink.h>
+#include <linux/nospec.h>
 #include "mac80211_hwsim.h"
 
 #define WARN_QUEUE 100
@@ -2898,6 +2899,10 @@ static int hwsim_new_radio_nl(struct sk_buff *msg, struct genl_info *info)
 	if (info->attrs[HWSIM_ATTR_CHANNELS])
 		param.channels = nla_get_u32(info->attrs[HWSIM_ATTR_CHANNELS]);
 
+	if (param.channels > CFG80211_MAX_NUM_DIFFERENT_CHANNELS) {
+		return -EINVAL;
+	}
+
 	if (info->attrs[HWSIM_ATTR_NO_VIF])
 		param.no_vif = true;
 
@@ -2926,6 +2931,9 @@ static int hwsim_new_radio_nl(struct sk_buff *msg, struct genl_info *info)
 			kfree(hwname);
 			return -EINVAL;
 		}
+
+		idx = array_index_nospec(idx,
+					 ARRAY_SIZE(hwsim_world_regdom_custom));
 		param.regd = hwsim_world_regdom_custom[idx];
 	}
 
@@ -3174,20 +3182,20 @@ static int __init init_mac80211_hwsim(void)
 	if (channels < 1)
 		return -EINVAL;
 
-	mac80211_hwsim_mchan_ops = mac80211_hwsim_ops;
-	mac80211_hwsim_mchan_ops.hw_scan = mac80211_hwsim_hw_scan;
-	mac80211_hwsim_mchan_ops.cancel_hw_scan = mac80211_hwsim_cancel_hw_scan;
-	mac80211_hwsim_mchan_ops.sw_scan_start = NULL;
-	mac80211_hwsim_mchan_ops.sw_scan_complete = NULL;
-	mac80211_hwsim_mchan_ops.remain_on_channel = mac80211_hwsim_roc;
-	mac80211_hwsim_mchan_ops.cancel_remain_on_channel = mac80211_hwsim_croc;
-	mac80211_hwsim_mchan_ops.add_chanctx = mac80211_hwsim_add_chanctx;
-	mac80211_hwsim_mchan_ops.remove_chanctx = mac80211_hwsim_remove_chanctx;
-	mac80211_hwsim_mchan_ops.change_chanctx = mac80211_hwsim_change_chanctx;
-	mac80211_hwsim_mchan_ops.assign_vif_chanctx =
-		mac80211_hwsim_assign_vif_chanctx;
-	mac80211_hwsim_mchan_ops.unassign_vif_chanctx =
-		mac80211_hwsim_unassign_vif_chanctx;
+	pax_open_kernel();
+	memcpy((void *)&mac80211_hwsim_mchan_ops, &mac80211_hwsim_ops, sizeof mac80211_hwsim_mchan_ops);
+	const_cast(mac80211_hwsim_mchan_ops.hw_scan) = mac80211_hwsim_hw_scan;
+	const_cast(mac80211_hwsim_mchan_ops.cancel_hw_scan) = mac80211_hwsim_cancel_hw_scan;
+	const_cast(mac80211_hwsim_mchan_ops.sw_scan_start) = NULL;
+	const_cast(mac80211_hwsim_mchan_ops.sw_scan_complete) = NULL;
+	const_cast(mac80211_hwsim_mchan_ops.remain_on_channel) = mac80211_hwsim_roc;
+	const_cast(mac80211_hwsim_mchan_ops.cancel_remain_on_channel) = mac80211_hwsim_croc;
+	const_cast(mac80211_hwsim_mchan_ops.add_chanctx) = mac80211_hwsim_add_chanctx;
+	const_cast(mac80211_hwsim_mchan_ops.remove_chanctx) = mac80211_hwsim_remove_chanctx;
+	const_cast(mac80211_hwsim_mchan_ops.change_chanctx) = mac80211_hwsim_change_chanctx;
+	const_cast(mac80211_hwsim_mchan_ops.assign_vif_chanctx) = mac80211_hwsim_assign_vif_chanctx;
+	const_cast(mac80211_hwsim_mchan_ops.unassign_vif_chanctx) = mac80211_hwsim_unassign_vif_chanctx;
+	pax_close_kernel();
 
 	spin_lock_init(&hwsim_radio_lock);
 	INIT_LIST_HEAD(&hwsim_radios);

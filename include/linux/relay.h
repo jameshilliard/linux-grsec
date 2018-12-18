@@ -157,7 +157,7 @@ struct rchan_callbacks
 	 * The callback should return 0 if successful, negative if not.
 	 */
 	int (*remove_buf_file)(struct dentry *dentry);
-};
+} __no_const;
 
 /*
  * CONFIG_RELAY kernel API, kernel/relay.c

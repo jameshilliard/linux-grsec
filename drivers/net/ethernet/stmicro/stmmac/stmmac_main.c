@@ -2226,6 +2226,7 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit)
 				 * them in stmmac_rx_refill() function so that
 				 * device can reuse it.
 				 */
+				dev_kfree_skb_any(priv->rx_skbuff[entry]);
 				priv->rx_skbuff[entry] = NULL;
 				dma_unmap_single(priv->device,
 						 priv->rx_skbuff_dma[entry],
@@ -3014,6 +3015,7 @@ int stmmac_dvr_remove(struct net_device *ndev)
 	stmmac_set_mac(priv->ioaddr, false);
 	netif_carrier_off(ndev);
 	unregister_netdev(ndev);
+	of_node_put(priv->plat->phy_node);
 	if (priv->stmmac_rst)
 		reset_control_assert(priv->stmmac_rst);
 	clk_disable_unprepare(priv->pclk);

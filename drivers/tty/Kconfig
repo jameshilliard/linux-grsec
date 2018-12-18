@@ -317,6 +317,7 @@ config ISI
 config N_HDLC
 	tristate "HDLC line discipline support"
 	depends on SERIAL_NONSTANDARD
+	default n
 	help
 	  Allows synchronous HDLC communications with tty device drivers that
 	  support synchronous HDLC such as the Microgate SyncLink adapter.

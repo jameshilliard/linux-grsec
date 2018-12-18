@@ -4,7 +4,9 @@
 
 menuconfig TIPC
 	tristate "The TIPC Protocol"
+	default n
 	depends on INET
+	default n
 	---help---
 	  The Transparent Inter Process Communication (TIPC) protocol is
 	  specially designed for intra cluster communication. This protocol

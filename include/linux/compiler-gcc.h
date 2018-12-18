@@ -135,8 +135,8 @@
  */
 #define __pure			__attribute__((pure))
 #define __aligned(x)		__attribute__((aligned(x)))
-#define __printf(a, b)		__attribute__((format(printf, a, b)))
-#define __scanf(a, b)		__attribute__((format(scanf, a, b)))
+#define __printf(a, b)		__attribute__((format(printf, a, b))) __nocapture(a, b)
+#define __scanf(a, b)		__attribute__((format(scanf, a, b))) __nocapture(a, b)
 #define __attribute_const__	__attribute__((__const__))
 #define __maybe_unused		__attribute__((unused))
 #define __always_unused		__attribute__((unused))
@@ -203,9 +203,58 @@
 # define __compiletime_warning(message) __attribute__((warning(message)))
 # define __compiletime_error(message) __attribute__((error(message)))
 #endif /* __CHECKER__ */
+
+#define __alloc_size(...)	__attribute((alloc_size(__VA_ARGS__)))
+#define __bos(ptr, arg)		__builtin_object_size((ptr), (arg))
+#define __bos0(ptr)		__bos((ptr), 0)
+#define __bos1(ptr)		__bos((ptr), 1)
 #endif /* GCC_VERSION >= 40300 */
 
 #if GCC_VERSION >= 40500
+
+#ifdef RANDSTRUCT_PLUGIN
+#define __randomize_layout __attribute__((randomize_layout))
+#define __no_randomize_layout __attribute__((no_randomize_layout))
+#endif
+
+#ifdef CONSTIFY_PLUGIN
+#define __no_const __attribute__((no_const))
+#define __do_const __attribute__((do_const))
+#define const_cast(x) (*(typeof((typeof(x))0) *)&(x))
+#endif
+
+#ifdef SIZE_OVERFLOW_PLUGIN
+#define __size_overflow(...) __attribute__((size_overflow(__VA_ARGS__)))
+#define __intentional_overflow(...) __attribute__((intentional_overflow(__VA_ARGS__)))
+#define __turn_off_size_overflow __attribute__((intentional_overflow(-1)))
+#define __skip_size_overflow __attribute__((intentional_overflow(0)))
+#endif
+
+#ifndef __CHECKER__
+#ifdef LATENT_ENTROPY_PLUGIN
+#define __latent_entropy __attribute__((latent_entropy))
+#endif
+#endif
+
+/*
+ * The initify gcc-plugin attempts to identify const arguments that are only
+ * used during init (see __init and __exit), so they can be moved to the
+ * .init.rodata/.exit.rodata section. If an argument is passed to a non-init
+ * function, it must normally be assumed that such an argument has been
+ * captured by that function and may be used in the future when .init/.exit has
+ * been unmapped from memory. In order to identify functions that are confirmed
+ * to not capture their arguments, the __nocapture() attribute is used so that
+ * initify can better identify candidate variables.
+ */
+#ifdef INITIFY_PLUGIN
+#define __nocapture(...) __attribute__((nocapture(__VA_ARGS__)))
+#define __unverified_nocapture(...) __attribute__((unverified_nocapture(__VA_ARGS__)))
+#endif
+
+#ifdef RAP_PLUGIN
+#define __rap_hash __attribute__((rap_hash))
+#endif
+
 /*
  * Mark a position in code as unreachable.  This can be used to
  * suppress control flow warnings after asm blocks that transfer
@@ -302,3 +351,7 @@
  * code
  */
 #define uninitialized_var(x) x = x
+
+#if GCC_VERSION >= 50100
+#define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW 1
+#endif

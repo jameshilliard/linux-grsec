@@ -1150,11 +1150,11 @@ void sptlrpc_cli_finish_early_reply(struct ptlrpc_request *early_req)
 /*
  * "fixed" sec (e.g. null) use sec_id < 0
  */
-static atomic_t sptlrpc_sec_id = ATOMIC_INIT(1);
+static atomic_unchecked_t sptlrpc_sec_id = ATOMIC_INIT(1);
 
 int sptlrpc_get_next_secid(void)
 {
-	return atomic_inc_return(&sptlrpc_sec_id);
+	return atomic_inc_return_unchecked(&sptlrpc_sec_id);
 }
 EXPORT_SYMBOL(sptlrpc_get_next_secid);
 

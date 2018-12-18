@@ -8,6 +8,7 @@
 #include <asm/asm.h>
 #include <asm/errno.h>
 #include <asm/cpumask.h>
+#include <asm/barrier.h>
 #include <uapi/asm/msr.h>
 
 struct msr {

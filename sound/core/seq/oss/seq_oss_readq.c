@@ -99,7 +99,7 @@ snd_seq_oss_readq_clear(struct seq_oss_readq *q)
  * put a midi byte
  */
 int
-snd_seq_oss_readq_puts(struct seq_oss_readq *q, int dev, unsigned char *data, int len)
+snd_seq_oss_readq_puts(struct seq_oss_readq *q, int dev, const unsigned char *data, int len)
 {
 	union evrec rec;
 	int result;
@@ -126,7 +126,7 @@ struct readq_sysex_ctx {
 	int dev;
 };
 
-static int readq_dump_sysex(void *ptr, void *buf, int count)
+static int readq_dump_sysex(void *ptr, const void *buf, int count)
 {
 	struct readq_sysex_ctx *ctx = ptr;
 

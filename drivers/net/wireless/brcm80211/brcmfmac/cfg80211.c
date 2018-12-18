@@ -1107,7 +1107,7 @@ brcmf_cfg80211_escan(struct wiphy *wiphy, struct brcmf_cfg80211_vif *vif,
 
 	/* Arm scan timeout timer */
 	mod_timer(&cfg->escan_timeout, jiffies +
-			WL_ESCAN_TIMER_INTERVAL_MS * HZ / 1000);
+			BRCMF_ESCAN_TIMER_INTERVAL_MS * HZ / 1000);
 
 	return 0;
 
@@ -2930,7 +2930,7 @@ brcmf_cfg80211_escan_handler(struct brcmf_if *ifp,
 			goto exit;
 		}
 		escan_buflen = le32_to_cpu(escan_result_le->buflen);
-		if (escan_buflen > WL_ESCAN_BUF_SIZE ||
+		if (escan_buflen > BRCMF_ESCAN_BUF_SIZE ||
 		    escan_buflen > e->datalen ||
 		    escan_buflen < sizeof(*escan_result_le)) {
 			brcmf_err("Invalid escan buffer length: %d\n",
@@ -2970,7 +2970,7 @@ brcmf_cfg80211_escan_handler(struct brcmf_if *ifp,
 
 		list = (struct brcmf_scan_results *)
 				cfg->escan_info.escan_buf;
-		if (bi_length > WL_ESCAN_BUF_SIZE - list->buflen) {
+		if (bi_length > BRCMF_ESCAN_BUF_SIZE - list->buflen) {
 			brcmf_err("Buffer is too small: ignoring\n");
 			goto exit;
 		}
@@ -2983,8 +2983,8 @@ brcmf_cfg80211_escan_handler(struct brcmf_if *ifp,
 							  bss_info_le))
 				goto exit;
 		}
-		memcpy(&(cfg->escan_info.escan_buf[list->buflen]),
-			bss_info_le, bi_length);
+		memcpy(&cfg->escan_info.escan_buf[list->buflen], bss_info_le,
+		       bi_length);
 		list->version = le32_to_cpu(bss_info_le->version);
 		list->buflen += bi_length;
 		list->count++;
@@ -3331,8 +3331,18 @@ brcmf_notify_sched_scan_results(struct brcmf_if *ifp,
 
 	brcmf_dbg(SCAN, "Enter\n");
 
+	if (e->datalen < (sizeof(*pfn_result) + sizeof(*netinfo))) {
+		brcmf_dbg(SCAN, "Event data to small. Ignore\n");
+		return 0;
+	}
+
 	if (e->event_code == BRCMF_E_PFN_NET_LOST) {
 		brcmf_dbg(SCAN, "PFN NET LOST event. Do Nothing\n");
+		return 0;
+	}
+
+	if (e->datalen < (sizeof(*pfn_result) + sizeof(*netinfo))) {
+		brcmf_dbg(SCAN, "Event data to small. Ignore\n");
 		return 0;
 	}
 
@@ -5193,12 +5203,12 @@ static void brcmf_deinit_priv_mem(struct brcmf_cfg80211_info *cfg)
 {
 	kfree(cfg->conf);
 	cfg->conf = NULL;
-	kfree(cfg->escan_ioctl_buf);
-	cfg->escan_ioctl_buf = NULL;
 	kfree(cfg->extra_buf);
 	cfg->extra_buf = NULL;
 	kfree(cfg->pmk_list);
 	cfg->pmk_list = NULL;
+	kfree(cfg->escan_info.escan_buf);
+	cfg->escan_info.escan_buf = NULL;
 }
 
 static s32 brcmf_init_priv_mem(struct brcmf_cfg80211_info *cfg)
@@ -5206,14 +5216,14 @@ static s32 brcmf_init_priv_mem(struct brcmf_cfg80211_info *cfg)
 	cfg->conf = kzalloc(sizeof(*cfg->conf), GFP_KERNEL);
 	if (!cfg->conf)
 		goto init_priv_mem_out;
-	cfg->escan_ioctl_buf = kzalloc(BRCMF_DCMD_MEDLEN, GFP_KERNEL);
-	if (!cfg->escan_ioctl_buf)
-		goto init_priv_mem_out;
 	cfg->extra_buf = kzalloc(WL_EXTRA_BUF_MAX, GFP_KERNEL);
 	if (!cfg->extra_buf)
 		goto init_priv_mem_out;
 	cfg->pmk_list = kzalloc(sizeof(*cfg->pmk_list), GFP_KERNEL);
 	if (!cfg->pmk_list)
+		goto init_priv_mem_out;
+	cfg->escan_info.escan_buf = kzalloc(BRCMF_ESCAN_BUF_SIZE, GFP_KERNEL);
+	if (!cfg->escan_info.escan_buf)
 		goto init_priv_mem_out;
 
 	return 0;

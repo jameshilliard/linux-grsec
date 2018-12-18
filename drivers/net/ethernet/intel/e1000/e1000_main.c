@@ -521,8 +521,6 @@ void e1000_down(struct e1000_adapter *adapter)
 	struct net_device *netdev = adapter->netdev;
 	u32 rctl, tctl;
 
-	netif_carrier_off(netdev);
-
 	/* disable receives in the hardware */
 	rctl = er32(RCTL);
 	ew32(RCTL, rctl & ~E1000_RCTL_EN);
@@ -537,6 +535,15 @@ void e1000_down(struct e1000_adapter *adapter)
 	/* flush both disables and wait for them to finish */
 	E1000_WRITE_FLUSH();
 	msleep(10);
+
+	/* Set the carrier off after transmits have been disabled in the
+	 * hardware, to avoid race conditions with e1000_watchdog() (which
+	 * may be running concurrently to us, checking for the carrier
+	 * bit to decide whether it should enable transmits again). Such
+	 * a race condition would result into transmission being disabled
+	 * in the hardware until the next IFF_DOWN+IFF_UP cycle.
+	 */
+	netif_carrier_off(netdev);
 
 	napi_disable(&adapter->napi);
 
@@ -5252,7 +5259,7 @@ static void e1000_netpoll(struct net_device *netdev)
  * this device has been detected.
  */
 static pci_ers_result_t e1000_io_error_detected(struct pci_dev *pdev,
-						pci_channel_state_t state)
+							enum pci_channel_state state)
 {
 	struct net_device *netdev = pci_get_drvdata(pdev);
 	struct e1000_adapter *adapter = netdev_priv(netdev);

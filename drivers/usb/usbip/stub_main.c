@@ -189,7 +189,7 @@ static ssize_t store_match_busid(struct device_driver *dev, const char *buf,
 		return -EINVAL;
 
 	/* busid needs to include \0 termination */
-	len = strlcpy(busid, buf + 4, BUSID_SIZE);
+	len = strlcpy_check(busid, buf + 4, BUSID_SIZE);
 	if (sizeof(busid) <= len)
 		return -EINVAL;
 

@@ -52,7 +52,11 @@
 
 asmlinkage extern void ret_from_fork(void);
 
+#ifdef CONFIG_PARAVIRT
+__visible DEFINE_PER_CPU(unsigned long, rsp_scratch[64]);
+#else
 __visible DEFINE_PER_CPU(unsigned long, rsp_scratch);
+#endif
 
 /* Prints also some state that isn't saved in the pt_regs */
 void __show_regs(struct pt_regs *regs, int all)
@@ -62,9 +66,9 @@ void __show_regs(struct pt_regs *regs, int all)
 	unsigned int fsindex, gsindex;
 	unsigned int ds, cs, es;
 
-	printk(KERN_DEFAULT "RIP: %04lx:[<%016lx>] ", regs->cs & 0xffff, regs->ip);
+	printk(KERN_DEFAULT "RIP: %04x:[<%016lx>] ", (int)regs->cs & 0xffff, regs->ip);
 	printk_address(regs->ip);
-	printk(KERN_DEFAULT "RSP: %04lx:%016lx  EFLAGS: %08lx\n", regs->ss,
+	printk(KERN_DEFAULT "RSP: %04x:%016lx  EFLAGS: %08lx\n", (int)regs->ss,
 			regs->sp, regs->flags);
 	printk(KERN_DEFAULT "RAX: %016lx RBX: %016lx RCX: %016lx\n",
 	       regs->ax, regs->bx, regs->cx);
@@ -160,9 +164,10 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 	struct pt_regs *childregs;
 	struct task_struct *me = current;
 
-	p->thread.sp0 = (unsigned long)task_stack_page(p) + THREAD_SIZE;
+	p->thread.sp0 = (unsigned long)task_stack_page(p) + THREAD_SIZE - 16;
 	childregs = task_pt_regs(p);
 	p->thread.sp = (unsigned long) childregs;
+	p->tinfo.lowest_stack = (unsigned long)task_stack_page(p) + 2 * sizeof(unsigned long);
 	set_tsk_thread_flag(p, TIF_FORK);
 	p->thread.io_bitmap_ptr = NULL;
 
@@ -172,6 +177,8 @@ int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 	p->thread.fs = p->thread.fsindex ? 0 : me->thread.fs;
 	savesegment(es, p->thread.es);
 	savesegment(ds, p->thread.ds);
+	savesegment(ss, p->thread.ss);
+	BUG_ON(p->thread.ss == __UDEREF_KERNEL_DS);
 	memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
 
 	if (unlikely(p->flags & PF_KTHREAD)) {
@@ -280,7 +287,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	struct fpu *prev_fpu = &prev->fpu;
 	struct fpu *next_fpu = &next->fpu;
 	int cpu = smp_processor_id();
-	struct tss_struct *tss = &per_cpu(cpu_tss, cpu);
+	struct tss_struct *tss = cpu_tss + cpu;
 	unsigned fsindex, gsindex;
 	fpu_switch_t fpu_switch;
 
@@ -330,6 +337,10 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	savesegment(ds, prev->ds);
 	if (unlikely(next->ds | prev->ds))
 		loadsegment(ds, next->ds);
+
+	savesegment(ss, prev->ss);
+	if (unlikely(next->ss != prev->ss))
+		loadsegment(ss, next->ss);
 
 	/*
 	 * Switch FS and GS.
@@ -402,9 +413,12 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 * Switch the PDA and FPU contexts.
 	 */
 	this_cpu_write(current_task, next_p);
+	this_cpu_write(current_tinfo, &next_p->tinfo);
 
 	/* Reload esp0 and ss1.  This changes current_thread_info(). */
-	load_sp0(tss, next);
+	this_cpu_write(cpu_current_top_of_stack, task_top_of_stack(next_p));
+	update_sp1(cpu_tss + cpu, task_top_of_stack(next_p));
+	update_sp0(cpu_tss + cpu, next_p);
 
 	/*
 	 * Now maybe reload the debug registers and handle I/O bitmaps
@@ -413,7 +427,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
 
-#ifdef CONFIG_XEN
+#ifdef CONFIG_XEN_PV
 	/*
 	 * On Xen PV, IOPL bits in pt_regs->flags have no effect, and
 	 * current_pt_regs()->flags may not match the current task's
@@ -448,7 +462,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		 */
 		unsigned short ss_sel;
 		savesegment(ss, ss_sel);
-		if (ss_sel != __KERNEL_DS)
+		if (ss_sel != __KERNEL_DS && ss_sel != __UACCESS_KERNEL_DS)
 			loadsegment(ss, __KERNEL_DS);
 	}
 

@@ -183,7 +183,7 @@ static ssize_t usbdev_read(struct file *file, char __user *buf, size_t nbytes,
 	struct usb_dev_state *ps = file->private_data;
 	struct usb_device *dev = ps->dev;
 	ssize_t ret = 0;
-	unsigned len;
+	size_t len;
 	loff_t pos;
 	int i;
 
@@ -225,22 +225,22 @@ static ssize_t usbdev_read(struct file *file, char __user *buf, size_t nbytes,
 	for (i = 0; nbytes && i < dev->descriptor.bNumConfigurations; i++) {
 		struct usb_config_descriptor *config =
 			(struct usb_config_descriptor *)dev->rawdescriptors[i];
-		unsigned int length = le16_to_cpu(config->wTotalLength);
+		size_t length = le16_to_cpu(config->wTotalLength);
 
 		if (*ppos < pos + length) {
 
 			/* The descriptor may claim to be longer than it
 			 * really is.  Here is the actual allocated length. */
-			unsigned alloclen =
+			size_t alloclen =
 				le16_to_cpu(dev->config[i].desc.wTotalLength);
 
-			len = length - (*ppos - pos);
+			len = length + pos - *ppos;
 			if (len > nbytes)
 				len = nbytes;
 
 			/* Simply don't write (skip over) unallocated parts */
 			if (alloclen > (*ppos - pos)) {
-				alloclen -= (*ppos - pos);
+				alloclen = alloclen + pos - *ppos;
 				if (copy_to_user(buf,
 				    dev->rawdescriptors[i] + (*ppos - pos),
 				    min(len, alloclen))) {
@@ -1329,8 +1329,6 @@ static int proc_do_submiturb(struct usb_dev_state *ps, struct usbdevfs_urb *uurb
 	u = 0;
 	switch (uurb->type) {
 	case USBDEVFS_URB_TYPE_CONTROL:
-		if (is_in)
-			allow_short = true;
 		if (!usb_endpoint_xfer_control(&ep->desc))
 			return -EINVAL;
 		/* min 8 byte setup packet */
@@ -1360,6 +1358,8 @@ static int proc_do_submiturb(struct usb_dev_state *ps, struct usbdevfs_urb *uurb
 			is_in = 0;
 			uurb->endpoint &= ~USB_DIR_IN;
 		}
+		if (is_in)
+			allow_short = true;
 		snoop(&ps->dev->dev, "control urb: bRequestType=%02x "
 			"bRequest=%02x wValue=%04x "
 			"wIndex=%04x wLength=%04x\n",
@@ -1514,7 +1514,7 @@ static int proc_do_submiturb(struct usb_dev_state *ps, struct usbdevfs_urb *uurb
 		}
 	}
 	as->urb->dev = ps->dev;
-	as->urb->pipe = (uurb->type << 30) |
+	as->urb->pipe = ((unsigned int)uurb->type << 30) |
 			__create_pipe(ps->dev, uurb->endpoint & 0xf) |
 			(uurb->endpoint & USB_DIR_IN);
 

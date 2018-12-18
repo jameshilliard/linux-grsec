@@ -62,6 +62,7 @@
 #include <linux/sched/rt.h>
 #include <linux/page_owner.h>
 #include <linux/kthread.h>
+#include <linux/random.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -229,7 +230,6 @@ static char * const zone_names[MAX_NR_ZONES] = {
 #endif
 };
 
-static void free_compound_page(struct page *page);
 compound_page_dtor * const compound_page_dtors[] = {
 	NULL,
 	free_compound_page,
@@ -487,7 +487,7 @@ out:
  * This usage means that zero-order pages may not be compound.
  */
 
-static void free_compound_page(struct page *page)
+void free_compound_page(struct page *page)
 {
 	__free_pages_ok(page, compound_order(page));
 }
@@ -599,7 +599,7 @@ static inline void clear_page_guard(struct zone *zone, struct page *page,
 		__mod_zone_freepage_state(zone, (1 << order), migratetype);
 }
 #else
-struct page_ext_operations debug_guardpage_ops = { NULL, };
+struct page_ext_operations debug_guardpage_ops = { .need = NULL, .init = NULL };
 static inline void set_page_guard(struct zone *zone, struct page *page,
 				unsigned int order, int migratetype) {}
 static inline void clear_page_guard(struct zone *zone, struct page *page,
@@ -1011,6 +1011,10 @@ static bool free_pages_prepare(struct page *page, unsigned int order)
 	bool compound = PageCompound(page);
 	int i, bad = 0;
 
+#ifdef CONFIG_PAX_MEMORY_SANITIZE
+	unsigned long index = 1UL << order;
+#endif
+
 	VM_BUG_ON_PAGE(PageTail(page), page);
 	VM_BUG_ON_PAGE(compound && compound_order(page) != order, page);
 
@@ -1037,6 +1041,12 @@ static bool free_pages_prepare(struct page *page, unsigned int order)
 		debug_check_no_obj_freed(page_address(page),
 					   PAGE_SIZE << order);
 	}
+
+#ifdef CONFIG_PAX_MEMORY_SANITIZE
+	for (; index; --index)
+		sanitize_highpage(page + index - 1);
+#endif
+
 	arch_free_page(page, order);
 	kernel_map_pages(page, 1 << order, 0);
 
@@ -1059,6 +1069,20 @@ static void __free_pages_ok(struct page *page, unsigned int order)
 	local_irq_restore(flags);
 }
 
+bool __meminitdata extra_latent_entropy;
+
+static int __init setup_pax_extra_latent_entropy(char *str)
+{
+	extra_latent_entropy = true;
+	return 0;
+}
+early_param("pax_extra_latent_entropy", setup_pax_extra_latent_entropy);
+
+#ifdef LATENT_ENTROPY_PLUGIN
+volatile unsigned long latent_entropy __latent_entropy;
+EXPORT_SYMBOL(latent_entropy);
+#endif
+
 static void __init __free_pages_boot_core(struct page *page,
 					unsigned long pfn, unsigned int order)
 {
@@ -1074,6 +1098,21 @@ static void __init __free_pages_boot_core(struct page *page,
 	}
 	__ClearPageReserved(p);
 	set_page_count(p, 0);
+
+	if (extra_latent_entropy && !PageHighMem(page) && page_to_pfn(page) < 0x100000) {
+		unsigned long hash = 0;
+		size_t index, end = PAGE_SIZE * nr_pages / sizeof hash;
+		const unsigned long *data = lowmem_page_address(page);
+
+		for (index = 0; index < end; index++)
+			hash ^= hash + data[index];
+#ifdef LATENT_ENTROPY_PLUGIN
+		latent_entropy ^= hash;
+		add_device_randomness((const void *)&latent_entropy, sizeof(latent_entropy));
+#else
+		add_device_randomness((const void *)&hash, sizeof(hash));
+#endif
+	}
 
 	page_zone(page)->managed_pages += nr_pages;
 	set_page_refcounted(page);
@@ -1130,7 +1169,6 @@ static inline bool __meminit meminit_pfn_in_nid(unsigned long pfn, int node,
 	return true;
 }
 #endif
-
 
 void __init __free_pages_bootmem(struct page *page, unsigned long pfn,
 							unsigned int order)
@@ -1435,9 +1473,11 @@ static int prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags,
 	kernel_map_pages(page, 1 << order, 1);
 	kasan_alloc_pages(page, order);
 
+#ifndef CONFIG_PAX_MEMORY_SANITIZE
 	if (gfp_flags & __GFP_ZERO)
 		for (i = 0; i < (1 << order); i++)
 			clear_highpage(page + i);
+#endif
 
 	if (order && (gfp_flags & __GFP_COMP))
 		prep_compound_page(page, order);
@@ -1984,8 +2024,9 @@ static void drain_pages(unsigned int cpu)
  * The CPU has to be pinned. When zone parameter is non-NULL, spill just
  * the single zone's pages.
  */
-void drain_local_pages(struct zone *zone)
+void drain_local_pages(void *_zone)
 {
+	struct zone *zone = _zone;
 	int cpu = smp_processor_id();
 
 	if (zone)
@@ -2045,8 +2086,7 @@ void drain_all_pages(struct zone *zone)
 		else
 			cpumask_clear_cpu(cpu, &cpus_with_pcps);
 	}
-	on_each_cpu_mask(&cpus_with_pcps, (smp_call_func_t) drain_local_pages,
-								zone, 1);
+	on_each_cpu_mask(&cpus_with_pcps, drain_local_pages, zone, 1);
 }
 
 #ifdef CONFIG_HIBERNATION
@@ -2318,7 +2358,7 @@ struct page *buffered_rmqueue(struct zone *preferred_zone,
 	}
 
 	__mod_zone_page_state(zone, NR_ALLOC_BATCH, -(1 << order));
-	if (atomic_long_read(&zone->vm_stat[NR_ALLOC_BATCH]) <= 0 &&
+	if (atomic_long_read_unchecked(&zone->vm_stat[NR_ALLOC_BATCH]) <= 0 &&
 	    !test_bit(ZONE_FAIR_DEPLETED, &zone->flags))
 		set_bit(ZONE_FAIR_DEPLETED, &zone->flags);
 
@@ -2535,7 +2575,7 @@ static void reset_alloc_batches(struct zone *preferred_zone)
 	do {
 		mod_zone_page_state(zone, NR_ALLOC_BATCH,
 			high_wmark_pages(zone) - low_wmark_pages(zone) -
-			atomic_long_read(&zone->vm_stat[NR_ALLOC_BATCH]));
+			atomic_long_read_unchecked(&zone->vm_stat[NR_ALLOC_BATCH]));
 		clear_bit(ZONE_FAIR_DEPLETED, &zone->flags);
 	} while (zone++ != preferred_zone);
 }
@@ -4577,6 +4617,7 @@ void __meminit memmap_init_zone(unsigned long size, int nid, unsigned long zone,
 
 			__init_single_page(page, pfn, zone, nid);
 			set_pageblock_migratetype(page, MIGRATE_MOVABLE);
+			cond_resched();
 		} else {
 			__init_single_pfn(pfn, zone, nid);
 		}
@@ -6128,7 +6169,7 @@ static void __setup_per_zone_wmarks(void)
 
 		__mod_zone_page_state(zone, NR_ALLOC_BATCH,
 			high_wmark_pages(zone) - low_wmark_pages(zone) -
-			atomic_long_read(&zone->vm_stat[NR_ALLOC_BATCH]));
+			atomic_long_read_unchecked(&zone->vm_stat[NR_ALLOC_BATCH]));
 
 		spin_unlock_irqrestore(&zone->lock, flags);
 	}

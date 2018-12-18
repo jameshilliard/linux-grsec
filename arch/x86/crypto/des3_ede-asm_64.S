@@ -15,6 +15,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .file "des3_ede-asm_64.S"
 .text

@@ -28,7 +28,7 @@
 struct gen_pci_cfg_bus_ops {
 	u32 bus_shift;
 	struct pci_ops ops;
-};
+} __do_const;
 
 struct gen_pci_cfg_windows {
 	struct resource				res;

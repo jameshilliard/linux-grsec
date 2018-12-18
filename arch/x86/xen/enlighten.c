@@ -12,6 +12,7 @@
  */
 
 #include <linux/cpu.h>
+#include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/smp.h>
@@ -130,8 +131,6 @@ EXPORT_SYMBOL_GPL(xen_start_info);
 
 struct shared_info xen_dummy_shared_info;
 
-void *xen_initial_gdt;
-
 RESERVE_BRK(shared_info_page_brk, PAGE_SIZE);
 __read_mostly int xen_have_vector_callback;
 EXPORT_SYMBOL_GPL(xen_have_vector_callback);
@@ -158,7 +157,7 @@ struct shared_info *HYPERVISOR_shared_info = &xen_dummy_shared_info;
 static int have_vcpu_info_placement = 1;
 
 struct tls_descs {
-	struct desc_struct desc[3];
+	struct desc_struct desc[GDT_ENTRY_TLS_ENTRIES];
 };
 
 /*
@@ -601,8 +600,7 @@ static void xen_load_gdt(const struct desc_ptr *dtr)
 {
 	unsigned long va = dtr->address;
 	unsigned int size = dtr->size + 1;
-	unsigned pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-	unsigned long frames[pages];
+	unsigned long frames[65536 / PAGE_SIZE];
 	int f;
 
 	/*
@@ -650,8 +648,7 @@ static void __init xen_load_gdt_boot(const struct desc_ptr *dtr)
 {
 	unsigned long va = dtr->address;
 	unsigned int size = dtr->size + 1;
-	unsigned pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
-	unsigned long frames[pages];
+	unsigned long frames[(GDT_SIZE + PAGE_SIZE - 1) / PAGE_SIZE];
 	int f;
 
 	/*
@@ -659,7 +656,7 @@ static void __init xen_load_gdt_boot(const struct desc_ptr *dtr)
 	 * 8-byte entries, or 16 4k pages..
 	 */
 
-	BUG_ON(size > 65536);
+	BUG_ON(size > GDT_SIZE);
 	BUG_ON(va & ~PAGE_MASK);
 
 	for (f = 0; va < dtr->address + size; va += PAGE_SIZE, f++) {
@@ -709,6 +706,8 @@ static void load_TLS_descriptor(struct thread_struct *t,
 
 static void xen_load_tls(struct thread_struct *t, unsigned int cpu)
 {
+	int idx;
+
 	/*
 	 * XXX sleazy hack: If we're being called in a lazy-cpu zone
 	 * and lazy gs handling is enabled, it means we're in a
@@ -737,9 +736,8 @@ static void xen_load_tls(struct thread_struct *t, unsigned int cpu)
 
 	xen_mc_batch();
 
-	load_TLS_descriptor(t, cpu, 0);
-	load_TLS_descriptor(t, cpu, 1);
-	load_TLS_descriptor(t, cpu, 2);
+	for (idx = 0; idx < GDT_ENTRY_TLS_ENTRIES; idx++)
+		load_TLS_descriptor(t, cpu, idx);
 
 	xen_mc_issue(PARAVIRT_LAZY_CPU);
 }
@@ -788,7 +786,7 @@ static int cvt_gate_to_trap(int vector, const gate_desc *val,
 	 * so we should never see them.  Warn if
 	 * there's an unexpected IST-using fault handler.
 	 */
-	if (addr == (unsigned long)debug)
+	if (addr == (unsigned long)int1)
 		addr = (unsigned long)xen_debug;
 	else if (addr == (unsigned long)int3)
 		addr = (unsigned long)xen_int3;
@@ -1123,6 +1121,13 @@ void xen_setup_shared_info(void)
 	xen_setup_mfn_list_list();
 }
 
+#if defined(CONFIG_PAX_RAP) || defined(CONFIG_FTRACE)
+PV_CALLEE_SAVE_REGS_THUNK(xen_save_fl_direct);
+PV_CALLEE_SAVE_REGS_THUNK(xen_restore_fl_direct);
+PV_CALLEE_SAVE_REGS_THUNK(xen_irq_disable_direct);
+PV_CALLEE_SAVE_REGS_THUNK(xen_irq_enable_direct);
+#endif
+
 /* This is called once we have the cpu_possible_mask */
 void xen_setup_vcpu_info_placement(void)
 {
@@ -1135,10 +1140,10 @@ void xen_setup_vcpu_info_placement(void)
 	 * percpu area for all cpus, so make use of it. Note that for
 	 * PVH we want to use native IRQ mechanism. */
 	if (have_vcpu_info_placement && !xen_pvh_domain()) {
-		pv_irq_ops.save_fl = __PV_IS_CALLEE_SAVE(xen_save_fl_direct);
-		pv_irq_ops.restore_fl = __PV_IS_CALLEE_SAVE(xen_restore_fl_direct);
-		pv_irq_ops.irq_disable = __PV_IS_CALLEE_SAVE(xen_irq_disable_direct);
-		pv_irq_ops.irq_enable = __PV_IS_CALLEE_SAVE(xen_irq_enable_direct);
+		pv_irq_ops.save_fl = __PV_IS_CALLEE_SAVE(save_fl, xen_save_fl_direct);
+		pv_irq_ops.restore_fl = __PV_IS_CALLEE_SAVE(restore_fl, xen_restore_fl_direct);
+		pv_irq_ops.irq_disable = __PV_IS_CALLEE_SAVE(irq_disable, xen_irq_disable_direct);
+		pv_irq_ops.irq_enable = __PV_IS_CALLEE_SAVE(irq_enable, xen_irq_enable_direct);
 		pv_mmu_ops.read_cr2 = xen_read_cr2_direct;
 	}
 }
@@ -1282,7 +1287,7 @@ static const struct pv_apic_ops xen_apic_ops __initconst = {
 #endif
 };
 
-static void xen_reboot(int reason)
+static __noreturn void xen_reboot(int reason)
 {
 	struct sched_shutdown r = { .reason = reason };
 	int cpu;
@@ -1290,26 +1295,26 @@ static void xen_reboot(int reason)
 	for_each_online_cpu(cpu)
 		xen_pmu_finish(cpu);
 
-	if (HYPERVISOR_sched_op(SCHEDOP_shutdown, &r))
-		BUG();
+	HYPERVISOR_sched_op(SCHEDOP_shutdown, &r);
+	BUG();
 }
 
-static void xen_restart(char *msg)
+static __noreturn void xen_restart(char *msg)
 {
 	xen_reboot(SHUTDOWN_reboot);
 }
 
-static void xen_emergency_restart(void)
+static __noreturn void xen_emergency_restart(void)
 {
 	xen_reboot(SHUTDOWN_reboot);
 }
 
-static void xen_machine_halt(void)
+static __noreturn void xen_machine_halt(void)
 {
 	xen_reboot(SHUTDOWN_poweroff);
 }
 
-static void xen_machine_power_off(void)
+static __noreturn void xen_machine_power_off(void)
 {
 	if (pm_power_off)
 		pm_power_off();
@@ -1462,8 +1467,11 @@ static void __ref xen_setup_gdt(int cpu)
 	pv_cpu_ops.write_gdt_entry = xen_write_gdt_entry_boot;
 	pv_cpu_ops.load_gdt = xen_load_gdt_boot;
 
-	setup_stack_canary_segment(0);
-	switch_to_new_gdt(0);
+	setup_stack_canary_segment(cpu);
+#ifdef CONFIG_X86_64
+	load_percpu_segment(cpu);
+#endif
+	switch_to_new_gdt(cpu);
 
 	pv_cpu_ops.write_gdt_entry = xen_write_gdt_entry;
 	pv_cpu_ops.load_gdt = xen_load_gdt;
@@ -1526,14 +1534,11 @@ static void __init xen_pvh_early_guest_init(void)
 #endif    /* CONFIG_XEN_PVH */
 
 /* First C function to be called on Xen boot */
-asmlinkage __visible void __init xen_start_kernel(void)
+asmlinkage __visible void __init __noreturn xen_start_kernel(void)
 {
 	struct physdev_set_iopl set_iopl;
 	unsigned long initrd_start = 0;
 	int rc;
-
-	if (!xen_start_info)
-		return;
 
 	xen_domain_type = XEN_PV_DOMAIN;
 
@@ -1579,9 +1584,6 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	 */
 	__userpte_alloc_gfp &= ~__GFP_HIGHMEM;
 
-	/* Work out if we support NX */
-	x86_configure_nx();
-
 	/* Get mfn list */
 	xen_build_dynamic_phys_to_machine();
 
@@ -1590,6 +1592,19 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	 * -fstack-protector code can be executed.
 	 */
 	xen_setup_gdt(0);
+
+	/* Work out if we support NX */
+#if defined(CONFIG_X86_64) || defined(CONFIG_X86_PAE)
+	if ((cpuid_eax(0x80000000) & 0xffff0000) == 0x80000000 &&
+	    (cpuid_edx(0x80000001) & (1U << (X86_FEATURE_NX & 31)))) {
+		unsigned l, h;
+
+		__supported_pte_mask |= _PAGE_NX;
+		rdmsr(MSR_EFER, l, h);
+		l |= EFER_NX;
+		wrmsr(MSR_EFER, l, h);
+	}
+#endif
 
 	xen_init_irq_ops();
 	xen_init_cpuid_mask();
@@ -1608,13 +1623,6 @@ asmlinkage __visible void __init xen_start_kernel(void)
 	}
 
 	machine_ops = xen_machine_ops;
-
-	/*
-	 * The only reliable way to retain the initial address of the
-	 * percpu gdt_page is to remember it here, so we can go and
-	 * mark it RW later, when the initial percpu area is freed.
-	 */
-	xen_initial_gdt = &per_cpu(gdt_page, 0);
 
 	xen_smp_init();
 

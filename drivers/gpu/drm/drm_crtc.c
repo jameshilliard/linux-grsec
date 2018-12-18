@@ -4138,7 +4138,7 @@ int drm_mode_getproperty_ioctl(struct drm_device *dev,
 					goto done;
 				}
 
-				if (copy_to_user(&enum_ptr[copied].name,
+				if (copy_to_user(enum_ptr[copied].name,
 						 &prop_enum->name, DRM_PROP_NAME_LEN)) {
 					ret = -EFAULT;
 					goto done;
@@ -5203,6 +5203,11 @@ out:
 	return ret;
 }
 
+static void drm_mode_page_flip_dmabuf_destroy(struct drm_pending_event *event)
+{
+	kfree(event);
+}
+
 /**
  * drm_mode_page_flip_ioctl - schedule an asynchronous fb update
  * @dev: DRM device
@@ -5304,8 +5309,7 @@ int drm_mode_page_flip_ioctl(struct drm_device *dev,
 		e->event.user_data = page_flip->user_data;
 		e->base.event = &e->event.base;
 		e->base.file_priv = file_priv;
-		e->base.destroy =
-			(void (*) (struct drm_pending_event *)) kfree;
+		e->base.destroy = drm_mode_page_flip_dmabuf_destroy;
 	}
 
 	crtc->primary->old_fb = crtc->primary->fb;

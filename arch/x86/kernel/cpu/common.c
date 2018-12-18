@@ -14,6 +14,7 @@
 #include <linux/smp.h>
 #include <linux/io.h>
 #include <linux/syscore_ops.h>
+#include <linux/mod_devicetable.h>
 
 #include <asm/stackprotector.h>
 #include <asm/perf_event.h>
@@ -94,60 +95,6 @@ static const struct cpu_dev default_cpu = {
 
 static const struct cpu_dev *this_cpu = &default_cpu;
 
-DEFINE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(struct gdt_page, gdt_page) = { .gdt = {
-#ifdef CONFIG_X86_64
-	/*
-	 * We need valid kernel segments for data and code in long mode too
-	 * IRET will check the segment types  kkeil 2000/10/28
-	 * Also sysret mandates a special GDT layout
-	 *
-	 * TLS descriptors are currently at a different place compared to i386.
-	 * Hopefully nobody expects them at a fixed place (Wine?)
-	 */
-	[GDT_ENTRY_KERNEL32_CS]		= GDT_ENTRY_INIT(0xc09b, 0, 0xfffff),
-	[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xa09b, 0, 0xfffff),
-	[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc093, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER32_CS]	= GDT_ENTRY_INIT(0xc0fb, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_DS]	= GDT_ENTRY_INIT(0xc0f3, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_CS]	= GDT_ENTRY_INIT(0xa0fb, 0, 0xfffff),
-#else
-	[GDT_ENTRY_KERNEL_CS]		= GDT_ENTRY_INIT(0xc09a, 0, 0xfffff),
-	[GDT_ENTRY_KERNEL_DS]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_CS]	= GDT_ENTRY_INIT(0xc0fa, 0, 0xfffff),
-	[GDT_ENTRY_DEFAULT_USER_DS]	= GDT_ENTRY_INIT(0xc0f2, 0, 0xfffff),
-	/*
-	 * Segments used for calling PnP BIOS have byte granularity.
-	 * They code segments and data segments have fixed 64k limits,
-	 * the transfer segment sizes are set at run time.
-	 */
-	/* 32-bit code */
-	[GDT_ENTRY_PNPBIOS_CS32]	= GDT_ENTRY_INIT(0x409a, 0, 0xffff),
-	/* 16-bit code */
-	[GDT_ENTRY_PNPBIOS_CS16]	= GDT_ENTRY_INIT(0x009a, 0, 0xffff),
-	/* 16-bit data */
-	[GDT_ENTRY_PNPBIOS_DS]		= GDT_ENTRY_INIT(0x0092, 0, 0xffff),
-	/* 16-bit data */
-	[GDT_ENTRY_PNPBIOS_TS1]		= GDT_ENTRY_INIT(0x0092, 0, 0),
-	/* 16-bit data */
-	[GDT_ENTRY_PNPBIOS_TS2]		= GDT_ENTRY_INIT(0x0092, 0, 0),
-	/*
-	 * The APM segments have byte granularity and their bases
-	 * are set at run time.  All have 64k limits.
-	 */
-	/* 32-bit code */
-	[GDT_ENTRY_APMBIOS_BASE]	= GDT_ENTRY_INIT(0x409a, 0, 0xffff),
-	/* 16-bit code */
-	[GDT_ENTRY_APMBIOS_BASE+1]	= GDT_ENTRY_INIT(0x009a, 0, 0xffff),
-	/* data */
-	[GDT_ENTRY_APMBIOS_BASE+2]	= GDT_ENTRY_INIT(0x4092, 0, 0xffff),
-
-	[GDT_ENTRY_ESPFIX_SS]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
-	[GDT_ENTRY_PERCPU]		= GDT_ENTRY_INIT(0xc092, 0, 0xfffff),
-	GDT_STACK_CANARY_INIT
-#endif
-} };
-EXPORT_PER_CPU_SYMBOL_GPL(gdt_page);
-
 static int __init x86_mpx_setup(char *s)
 {
 	/* require an exact match without trailing characters */
@@ -165,21 +112,23 @@ static int __init x86_mpx_setup(char *s)
 __setup("nompx", x86_mpx_setup);
 
 #ifdef CONFIG_X86_64
-static int __init x86_pcid_setup(char *s)
+static int __init x86_nopcid_setup(char *s)
 {
-	/* require an exact match without trailing characters */
-	if (strlen(s))
-		return 0;
+	/* nopcid doesn't accept parameters */
+	if (s)
+		return -EINVAL;
+
+	setup_clear_cpu_cap(X86_FEATURE_INVPCID);
 
 	/* do not emit a message if the feature is not present */
 	if (!boot_cpu_has(X86_FEATURE_PCID))
-		return 1;
+		return 0;
 
 	setup_clear_cpu_cap(X86_FEATURE_PCID);
 	pr_info("nopcid: PCID feature disabled\n");
-	return 1;
+	return 0;
 }
-__setup("nopcid", x86_pcid_setup);
+early_param("nopcid", x86_nopcid_setup);
 #endif
 
 static int __init x86_noinvpcid_setup(char *s)
@@ -298,14 +247,18 @@ static __always_inline void setup_smep(struct cpuinfo_x86 *c)
 {
 	if (cpu_has(c, X86_FEATURE_SMEP))
 		cr4_set_bits(X86_CR4_SMEP);
+#ifdef CONFIG_PAX_KERNEXEC_PLUGIN_METHOD_NONE
+	else
+		panic("PAX: this KERNEXEC configuration requires SMEP support\n");
+#endif
 }
 
 static __init int setup_disable_smap(char *arg)
 {
 	setup_clear_cpu_cap(X86_FEATURE_SMAP);
-	return 1;
+	return 0;
 }
-__setup("nosmap", setup_disable_smap);
+early_param("nosmap", setup_disable_smap);
 
 static __always_inline void setup_smap(struct cpuinfo_x86 *c)
 {
@@ -323,38 +276,15 @@ static __always_inline void setup_smap(struct cpuinfo_x86 *c)
 	}
 }
 
-static void setup_pcid(struct cpuinfo_x86 *c)
+#ifdef CONFIG_X86_64
+static __init int setup_disable_pcid(char *arg)
 {
-	if (cpu_has(c, X86_FEATURE_PCID)) {
-		if (cpu_has(c, X86_FEATURE_PGE) || kaiser_enabled) {
-			cr4_set_bits(X86_CR4_PCIDE);
-			/*
-			 * INVPCID has two "groups" of types:
-			 * 1/2: Invalidate an individual address
-			 * 3/4: Invalidate all contexts
-			 *
-			 * 1/2 take a PCID, but 3/4 do not.  So, 3/4
-			 * ignore the PCID argument in the descriptor.
-			 * But, we have to be careful not to call 1/2
-			 * with an actual non-zero PCID in them before
-			 * we do the above cr4_set_bits().
-			 */
-			if (cpu_has(c, X86_FEATURE_INVPCID))
-				set_cpu_cap(c, X86_FEATURE_INVPCID_SINGLE);
-		} else {
-			/*
-			 * flush_tlb_all(), as currently implemented, won't
-			 * work if PCID is on but PGE is not.  Since that
-			 * combination doesn't exist on real hardware, there's
-			 * no reason to try to fully support it, but it's
-			 * polite to avoid corrupting data if we're on
-			 * an improperly configured VM.
-			 */
-			clear_cpu_cap(c, X86_FEATURE_PCID);
-		}
-	}
-	kaiser_setup_pcid();
+	setup_clear_cpu_cap(X86_FEATURE_PCID);
+	setup_clear_cpu_cap(X86_FEATURE_INVPCID);
+	return 1;
 }
+__setup("nopcid", setup_disable_pcid);
+#endif
 
 /*
  * Some CPU features depend on higher CPUID levels, which may not always
@@ -448,19 +378,42 @@ void load_percpu_segment(int cpu)
 	load_stack_canary_segment();
 }
 
+#ifdef CONFIG_X86_32
+/* The 32-bit entry code needs to find cpu_entry_area. */
+DEFINE_PER_CPU(struct cpu_entry_area *, cpu_entry_area);
+#endif
+
+/* Load the original GDT from the per-cpu structure */
+void load_direct_gdt(int cpu)
+{
+	struct desc_ptr gdt_descr;
+
+	gdt_descr.address = (unsigned long)get_cpu_gdt_table(cpu);
+	gdt_descr.size = GDT_SIZE - 1;
+	load_gdt(&gdt_descr);
+}
+EXPORT_SYMBOL_GPL(load_direct_gdt);
+
+/* Load a fixmap remapping of the per-cpu GDT */
+void load_fixmap_gdt(int cpu)
+{
+	struct desc_ptr gdt_descr;
+
+	gdt_descr.address = (unsigned long)get_cpu_gdt_table_ro(cpu);
+	gdt_descr.size = GDT_SIZE - 1;
+	load_gdt(&gdt_descr);
+}
+EXPORT_SYMBOL_GPL(load_fixmap_gdt);
+
 /*
  * Current gdt points %fs at the "master" per-cpu area: after this,
  * it's on the real one.
  */
 void switch_to_new_gdt(int cpu)
 {
-	struct desc_ptr gdt_descr;
-
-	gdt_descr.address = (long)get_cpu_gdt_table(cpu);
-	gdt_descr.size = GDT_SIZE - 1;
-	load_gdt(&gdt_descr);
+	/* Load the original GDT */
+	load_direct_gdt(cpu);
 	/* Reload the per-cpu base */
-
 	load_percpu_segment(cpu);
 }
 
@@ -558,33 +511,36 @@ static void cpu_detect_tlb(struct cpuinfo_x86 *c)
 		tlb_lld_4m[ENTRIES], tlb_lld_1g[ENTRIES]);
 }
 
-void detect_ht(struct cpuinfo_x86 *c)
+int detect_ht_early(struct cpuinfo_x86 *c)
 {
 #ifdef CONFIG_SMP
 	u32 eax, ebx, ecx, edx;
-	int index_msb, core_bits;
-	static bool printed;
 
 	if (!cpu_has(c, X86_FEATURE_HT))
-		return;
+		return -1;
 
 	if (cpu_has(c, X86_FEATURE_CMP_LEGACY))
-		goto out;
+		return -1;
 
 	if (cpu_has(c, X86_FEATURE_XTOPOLOGY))
-		return;
+		return -1;
 
 	cpuid(1, &eax, &ebx, &ecx, &edx);
 
 	smp_num_siblings = (ebx & 0xff0000) >> 16;
-
-	if (smp_num_siblings == 1) {
+	if (smp_num_siblings == 1)
 		printk_once(KERN_INFO "CPU0: Hyper-Threading is disabled\n");
-		goto out;
-	}
+#endif
+	return 0;
+}
 
-	if (smp_num_siblings <= 1)
-		goto out;
+void detect_ht(struct cpuinfo_x86 *c)
+{
+#ifdef CONFIG_SMP
+	int index_msb, core_bits;
+
+	if (detect_ht_early(c) < 0)
+		return;
 
 	index_msb = get_count_order(smp_num_siblings);
 	c->phys_proc_id = apic->phys_pkg_id(c->initial_apicid, index_msb);
@@ -597,15 +553,6 @@ void detect_ht(struct cpuinfo_x86 *c)
 
 	c->cpu_core_id = apic->phys_pkg_id(c->initial_apicid, index_msb) &
 				       ((1 << core_bits) - 1);
-
-out:
-	if (!printed && (c->x86_max_cores * smp_num_siblings) > 1) {
-		printk(KERN_INFO  "CPU: Physical Processor ID: %d\n",
-		       c->phys_proc_id);
-		printk(KERN_INFO  "CPU: Processor Core ID: %d\n",
-		       c->cpu_core_id);
-		printed = 1;
-	}
 #endif
 }
 
@@ -693,7 +640,8 @@ static void init_speculation_control(struct cpuinfo_x86 *c)
 	if (cpu_has(c, X86_FEATURE_INTEL_STIBP))
 		set_cpu_cap(c, X86_FEATURE_STIBP);
 
-	if (cpu_has(c, X86_FEATURE_SPEC_CTRL_SSBD))
+	if (cpu_has(c, X86_FEATURE_SPEC_CTRL_SSBD) ||
+	    cpu_has(c, X86_FEATURE_VIRT_SSBD))
 		set_cpu_cap(c, X86_FEATURE_SSBD);
 
 	if (cpu_has(c, X86_FEATURE_AMD_IBRS)) {
@@ -707,6 +655,12 @@ static void init_speculation_control(struct cpuinfo_x86 *c)
 	if (cpu_has(c, X86_FEATURE_AMD_STIBP)) {
 		set_cpu_cap(c, X86_FEATURE_STIBP);
 		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
+	}
+
+	if (cpu_has(c, X86_FEATURE_AMD_SSBD)) {
+		set_cpu_cap(c, X86_FEATURE_SSBD);
+		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
+		clear_cpu_cap(c, X86_FEATURE_VIRT_SSBD);
 	}
 }
 
@@ -838,6 +792,7 @@ static void identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
 			}
 		}
 #endif
+	c->x86_cache_bits = c->x86_phys_bits;
 }
 
 static const __initconst struct x86_cpu_id cpu_no_speculation[] = {
@@ -858,12 +813,8 @@ static const __initconst struct x86_cpu_id cpu_no_meltdown[] = {
 	{}
 };
 
+/* Only list CPUs which speculate but are non susceptible to SSB */
 static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PINEVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_LINCROFT	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PENWELL		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CLOVERVIEW	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CEDARVIEW	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
@@ -871,14 +822,17 @@ static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE_YONAH		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM		},
-	{ X86_VENDOR_CENTAUR,	5,					},
-	{ X86_VENDOR_INTEL,	5,					},
-	{ X86_VENDOR_NSC,	5,					},
 	{ X86_VENDOR_AMD,	0x12,					},
 	{ X86_VENDOR_AMD,	0x11,					},
 	{ X86_VENDOR_AMD,	0x10,					},
 	{ X86_VENDOR_AMD,	0xf,					},
-	{ X86_VENDOR_ANY,	4,					},
+	{}
+};
+
+static const __initconst struct x86_cpu_id cpu_spec_segment_limit_bypass[] = {
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
 	{}
 };
 
@@ -901,18 +855,22 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 {
 	u64 ia32_cap = 0;
 
-	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
-		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
-
-	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
-	   !(ia32_cap & ARCH_CAP_SSB_NO))
-		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
-
 	if (x86_match_cpu(cpu_no_speculation))
 		return;
 
 	setup_force_cpu_bug(X86_BUG_SPECTRE_V1);
 	setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
+
+	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
+
+	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
+	   !(ia32_cap & ARCH_CAP_SSB_NO) &&
+	   !cpu_has(c, X86_FEATURE_AMD_SSB_NO))
+		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
+
+	if (ia32_cap & ARCH_CAP_IBRS_ALL)
+		setup_force_cpu_cap(X86_FEATURE_IBRS_ENHANCED);
 
 	if (x86_match_cpu(cpu_no_meltdown))
 		return;
@@ -927,6 +885,12 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 		return;
 
 	setup_force_cpu_bug(X86_BUG_L1TF);
+
+#ifdef CONFIG_X86_32
+	if (x86_match_cpu(cpu_spec_segment_limit_bypass))
+		setup_force_cpu_bug(X86_BUG_SPEC_SEGMENT_LIMIT_BYPASS);
+#endif
+
 }
 
 /*
@@ -985,6 +949,7 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	 * that it can't be enabled in 32-bit mode.
 	 */
 	setup_clear_cpu_cap(X86_FEATURE_PCID);
+	setup_clear_cpu_cap(X86_FEATURE_INVPCID);
 #endif
 }
 
@@ -1081,9 +1046,11 @@ static void x86_init_cache_qos(struct cpuinfo_x86 *c)
 	 * in case CQM bits really aren't there in this CPU.
 	 */
 	if (c != &boot_cpu_data) {
+		pax_open_kernel();
 		boot_cpu_data.x86_cache_max_rmid =
 			min(boot_cpu_data.x86_cache_max_rmid,
 			    c->x86_cache_max_rmid);
+		pax_close_kernel();
 	}
 }
 
@@ -1147,8 +1114,17 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	setup_smep(c);
 	setup_smap(c);
 
-	/* Set up PCID */
-	setup_pcid(c);
+	kaiser_setup_pcid();
+
+#ifdef CONFIG_X86_32
+#ifdef CONFIG_PAX_PAGEEXEC
+	if (!(__supported_pte_mask & _PAGE_NX))
+		clear_cpu_cap(c, X86_FEATURE_PSE);
+#endif
+#if defined(CONFIG_PAX_SEGMEXEC) || defined(CONFIG_PAX_KERNEXEC) || defined(CONFIG_PAX_MEMORY_UDEREF)
+	clear_cpu_cap(c, X86_FEATURE_SEP);
+#endif
+#endif
 
 	/*
 	 * The vendor-specific functions might have changed features.
@@ -1191,9 +1167,13 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	 * executed, c == &boot_cpu_data.
 	 */
 	if (c != &boot_cpu_data) {
+		pax_open_kernel();
+
 		/* AND the already accumulated flags with these */
 		for (i = 0; i < NCAPINTS; i++)
 			boot_cpu_data.x86_capability[i] &= c->x86_capability[i];
+
+		pax_close_kernel();
 
 		/* OR, i.e. replicate the bug flags */
 		for (i = NCAPINTS; i < NCAPINTS + NBUGINTS; i++)
@@ -1208,6 +1188,8 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 #ifdef CONFIG_NUMA
 	numa_add_cpu(smp_processor_id());
 #endif
+	/* The boot/hotplug time assigment got cleared, restore it */
+	c->logical_proc_id = topology_phys_to_logical_pkg(c->phys_proc_id);
 }
 
 /*
@@ -1220,11 +1202,11 @@ void enable_sep_cpu(void)
 	struct tss_struct *tss;
 	int cpu;
 
-	cpu = get_cpu();
-	tss = &per_cpu(cpu_tss, cpu);
-
 	if (!boot_cpu_has(X86_FEATURE_SEP))
-		goto out;
+		return;
+
+	cpu = get_cpu();
+	tss = cpu_tss + cpu;
 
 	/*
 	 * We cache MSR_IA32_SYSENTER_CS's value in the TSS's ss1 field --
@@ -1233,14 +1215,9 @@ void enable_sep_cpu(void)
 
 	tss->x86_tss.ss1 = __KERNEL_CS;
 	wrmsr(MSR_IA32_SYSENTER_CS, tss->x86_tss.ss1, 0);
-
-	wrmsr(MSR_IA32_SYSENTER_ESP,
-	      (unsigned long)tss + offsetofend(struct tss_struct, SYSENTER_stack),
-	      0);
-
+	wrmsr(MSR_IA32_SYSENTER_ESP, (unsigned long)(cpu_entry_stack(cpu) + 1), 0);
 	wrmsr(MSR_IA32_SYSENTER_EIP, (unsigned long)entry_SYSENTER_32, 0);
 
-out:
 	put_cpu();
 }
 #endif
@@ -1368,10 +1345,12 @@ static __init int setup_disablecpuid(char *arg)
 }
 __setup("clearcpuid=", setup_disablecpuid);
 
+DEFINE_PER_CPU(struct thread_info *, current_tinfo) = &init_task.tinfo;
+EXPORT_PER_CPU_SYMBOL(current_tinfo);
+
 #ifdef CONFIG_X86_64
-struct desc_ptr idt_descr = { NR_VECTORS * 16 - 1, (unsigned long) idt_table };
-struct desc_ptr debug_idt_descr = { NR_VECTORS * 16 - 1,
-				    (unsigned long) debug_idt_table };
+struct desc_ptr idt_descr __read_only = { NR_VECTORS * 16 - 1, (unsigned long) idt_table };
+const struct desc_ptr debug_idt_descr = { NR_VECTORS * 16 - 1, (unsigned long) debug_idt_table };
 
 DEFINE_PER_CPU_FIRST(union irq_stack_union,
 		     irq_stack_union) __aligned(PAGE_SIZE) __visible;
@@ -1385,6 +1364,8 @@ DEFINE_PER_CPU(struct task_struct *, current_task) ____cacheline_aligned =
 EXPORT_PER_CPU_SYMBOL(current_task);
 
 DEFINE_PER_CPU(char *, irq_stack_ptr) =
+	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
+DEFINE_PER_CPU(char *, irq_stack_ptr_lowmem) =
 	init_per_cpu_var(irq_stack_union.irq_stack) + IRQ_STACK_SIZE - 64;
 
 DEFINE_PER_CPU(unsigned int, irq_count) __visible = -1;
@@ -1403,19 +1384,31 @@ static const unsigned int exception_stack_sizes[N_EXCEPTION_STACKS] = {
 	  [DEBUG_STACK - 1]			= DEBUG_STKSZ
 };
 
-DEFINE_PER_CPU_PAGE_ALIGNED_USER_MAPPED(char, exception_stacks
-	[(N_EXCEPTION_STACKS - 1) * EXCEPTION_STKSZ + DEBUG_STKSZ]);
-
 /* May not be marked __init: used by software suspend */
 void syscall_init(void)
 {
+	unsigned int cpu = smp_processor_id();
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	extern char _entry_trampoline[];
+	extern char entry_SYSCALL_64_trampoline[];
+	unsigned long SYSCALL64_entry_trampoline =
+		(unsigned long)get_cpu_entry_area(cpu)->entry_trampoline +
+		(entry_SYSCALL_64_trampoline - _entry_trampoline);
+#endif
+
 	/*
 	 * LSTAR and STAR live in a bit strange symbiosis.
 	 * They both write to the same internal register. STAR allows to
 	 * set CS/DS but only a 32bit target. LSTAR sets the 64bit rip.
 	 */
 	wrmsrl(MSR_STAR,  ((u64)__USER32_CS)<<48  | ((u64)__KERNEL_CS)<<32);
-	wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64);
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	if (boot_cpu_has(X86_FEATURE_UDEREF))
+		wrmsrl(MSR_LSTAR, SYSCALL64_entry_trampoline);
+	else
+#endif
+		wrmsrl(MSR_LSTAR, (unsigned long)entry_SYSCALL_64);
 
 #ifdef CONFIG_IA32_EMULATION
 	wrmsrl(MSR_CSTAR, (unsigned long)entry_SYSCALL_compat);
@@ -1426,7 +1419,7 @@ void syscall_init(void)
 	 * AMD doesn't allow SYSENTER in long mode (either 32- or 64-bit).
 	 */
 	wrmsrl_safe(MSR_IA32_SYSENTER_CS, (u64)__KERNEL_CS);
-	wrmsrl_safe(MSR_IA32_SYSENTER_ESP, 0ULL);
+	wrmsrl_safe(MSR_IA32_SYSENTER_ESP, (unsigned long)(cpu_entry_stack(cpu) + 1));
 	wrmsrl_safe(MSR_IA32_SYSENTER_EIP, (u64)entry_SYSENTER_compat);
 #else
 	wrmsrl(MSR_CSTAR, (unsigned long)ignore_sysret);
@@ -1483,20 +1476,20 @@ EXPORT_PER_CPU_SYMBOL(current_task);
 DEFINE_PER_CPU(int, __preempt_count) = INIT_PREEMPT_COUNT;
 EXPORT_PER_CPU_SYMBOL(__preempt_count);
 
-/*
- * On x86_32, vm86 modifies tss.sp0, so sp0 isn't a reliable way to find
- * the top of the kernel stack.  Use an extra percpu variable to track the
- * top of the kernel stack directly.
- */
-DEFINE_PER_CPU(unsigned long, cpu_current_top_of_stack) =
-	(unsigned long)&init_thread_union + THREAD_SIZE;
-EXPORT_PER_CPU_SYMBOL(cpu_current_top_of_stack);
-
 #ifdef CONFIG_CC_STACKPROTECTOR
 DEFINE_PER_CPU_ALIGNED(struct stack_canary, stack_canary);
 #endif
 
 #endif	/* CONFIG_X86_64 */
+
+/*
+ * On x86_32, vm86 modifies tss.sp0, so sp0 isn't a reliable way to find
+ * the top of the kernel stack.  Use an extra percpu variable to track the
+ * top of the kernel stack directly.
+ */
+DEFINE_PER_CPU_USER_MAPPED(unsigned long, cpu_current_top_of_stack) =
+	(unsigned long)&init_thread_union - 16 + THREAD_SIZE;
+EXPORT_PER_CPU_SYMBOL(cpu_current_top_of_stack);
 
 /*
  * Clear all 6 debug registers:
@@ -1566,7 +1559,7 @@ void cpu_init(void)
 	 * try to read it.
 	 */
 	cr4_init_shadow();
-	if (!kaiser_enabled) {
+	if (!kaiser_enabled && !boot_cpu_has(X86_FEATURE_UDEREF)) {
 		/*
 		 * secondary_startup_64() deferred setting PGE in cr4:
 		 * probe_page_size_mask() sets it on the boot cpu,
@@ -1581,7 +1574,7 @@ void cpu_init(void)
 	 */
 	load_ucode_ap();
 
-	t = &per_cpu(cpu_tss, cpu);
+	t = cpu_tss + cpu;
 	oist = &per_cpu(orig_ist, cpu);
 
 #ifdef CONFIG_NUMA
@@ -1607,20 +1600,22 @@ void cpu_init(void)
 	load_current_idt();
 
 	memset(me->thread.tls_array, 0, GDT_ENTRY_TLS_ENTRIES * 8);
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	memset(me->thread.tls_array_inverted, 0, GDT_ENTRY_TLS_ENTRIES * 8);
+#endif
 	syscall_init();
 
 	wrmsrl(MSR_FS_BASE, 0);
 	wrmsrl(MSR_KERNEL_GS_BASE, 0);
 	barrier();
 
-	x86_configure_nx();
 	x2apic_setup();
 
 	/*
 	 * set up and load the per-CPU TSS
 	 */
 	if (!oist->ist[0]) {
-		char *estacks = per_cpu(exception_stacks, cpu);
+		char *estacks = get_cpu_entry_area(cpu)->exception_stacks;
 
 		for (v = 0; v < N_EXCEPTION_STACKS; v++) {
 			estacks += exception_stack_sizes[v];
@@ -1645,9 +1640,10 @@ void cpu_init(void)
 	BUG_ON(me->mm);
 	enter_lazy_tlb(&init_mm, me);
 
-	load_sp0(t, &current->thread);
-	set_tss_desc(cpu, t);
+	set_tss_desc(cpu, &get_cpu_entry_area(cpu)->tss.x86_tss);
 	load_TR_desc();
+	cpu_tss[cpu].x86_tss.sp0 = (unsigned long)(cpu_entry_stack(cpu) + 1);
+
 	load_mm_ldt(&init_mm);
 
 	clear_all_debug_regs();
@@ -1657,6 +1653,8 @@ void cpu_init(void)
 
 	if (is_uv_system())
 		uv_cpu_init();
+
+	load_fixmap_gdt(cpu);
 }
 
 #else
@@ -1665,7 +1663,7 @@ void cpu_init(void)
 {
 	int cpu = smp_processor_id();
 	struct task_struct *curr = current;
-	struct tss_struct *t = &per_cpu(cpu_tss, cpu);
+	struct tss_struct *t = cpu_tss + cpu;
 	struct thread_struct *thread = &curr->thread;
 
 	wait_for_master_cpu(cpu);
@@ -1697,6 +1695,7 @@ void cpu_init(void)
 	enter_lazy_tlb(&init_mm, curr);
 
 	load_sp0(t, thread);
+//	set_tss_desc(cpu, &get_cpu_entry_area(cpu)->tss.x86_tss);
 	set_tss_desc(cpu, t);
 	load_TR_desc();
 	load_mm_ldt(&init_mm);

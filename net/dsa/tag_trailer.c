@@ -85,7 +85,8 @@ static int trailer_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (source_port >= DSA_MAX_PORTS || ds->ports[source_port] == NULL)
 		goto out_drop;
 
-	pskb_trim_rcsum(skb, skb->len - 4);
+	if (pskb_trim_rcsum(skb, skb->len - 4))
+		return NULL;
 
 	skb->dev = ds->ports[source_port];
 	skb_push(skb, ETH_HLEN);

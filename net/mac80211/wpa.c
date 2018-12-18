@@ -449,7 +449,7 @@ static int ccmp_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb,
 	hdr = (struct ieee80211_hdr *) pos;
 	pos += hdrlen;
 
-	pn64 = atomic64_inc_return(&key->conf.tx_pn);
+	pn64 = atomic64_inc_return_unchecked(&key->conf.tx_pn);
 
 	pn[5] = pn64;
 	pn[4] = pn64 >> 8;
@@ -684,7 +684,7 @@ static int gcmp_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 	hdr = (struct ieee80211_hdr *)pos;
 	pos += hdrlen;
 
-	pn64 = atomic64_inc_return(&key->conf.tx_pn);
+	pn64 = atomic64_inc_return_unchecked(&key->conf.tx_pn);
 
 	pn[5] = pn64;
 	pn[4] = pn64 >> 8;
@@ -962,7 +962,7 @@ ieee80211_crypto_aes_cmac_encrypt(struct ieee80211_tx_data *tx)
 	mmie->key_id = cpu_to_le16(key->conf.keyidx);
 
 	/* PN = PN + 1 */
-	pn64 = atomic64_inc_return(&key->conf.tx_pn);
+	pn64 = atomic64_inc_return_unchecked(&key->conf.tx_pn);
 
 	bip_ipn_set64(mmie->sequence_number, pn64);
 
@@ -1006,7 +1006,7 @@ ieee80211_crypto_aes_cmac_256_encrypt(struct ieee80211_tx_data *tx)
 	mmie->key_id = cpu_to_le16(key->conf.keyidx);
 
 	/* PN = PN + 1 */
-	pn64 = atomic64_inc_return(&key->conf.tx_pn);
+	pn64 = atomic64_inc_return_unchecked(&key->conf.tx_pn);
 
 	bip_ipn_set64(mmie->sequence_number, pn64);
 
@@ -1151,7 +1151,7 @@ ieee80211_crypto_aes_gmac_encrypt(struct ieee80211_tx_data *tx)
 	mmie->key_id = cpu_to_le16(key->conf.keyidx);
 
 	/* PN = PN + 1 */
-	pn64 = atomic64_inc_return(&key->conf.tx_pn);
+	pn64 = atomic64_inc_return_unchecked(&key->conf.tx_pn);
 
 	bip_ipn_set64(mmie->sequence_number, pn64);
 

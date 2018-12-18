@@ -332,8 +332,8 @@ typedef struct {
 	struct list_head sn_batches; /* list of batches */
 	char             sn_name[LST_NAME_SIZE];
 	atomic_t         sn_refcount;
-	atomic_t         sn_brw_errors;
-	atomic_t         sn_ping_errors;
+	atomic_unchecked_t sn_brw_errors;
+	atomic_unchecked_t sn_ping_errors;
 	unsigned long    sn_started;
 } sfw_session_t;
 

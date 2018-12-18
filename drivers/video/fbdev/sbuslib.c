@@ -121,7 +121,8 @@ int sbusfb_ioctl_helper(unsigned long cmd, unsigned long arg,
 		unsigned char __user *ured;
 		unsigned char __user *ugreen;
 		unsigned char __user *ublue;
-		unsigned int index, count, i;
+		/* guard against pulling in bad upstream fix */
+		int index, count, i;
 
 		if (get_user(index, &c->index) ||
 		    __get_user(count, &c->count) ||
@@ -160,7 +161,8 @@ int sbusfb_ioctl_helper(unsigned long cmd, unsigned long arg,
 		unsigned char __user *ugreen;
 		unsigned char __user *ublue;
 		struct fb_cmap *cmap = &info->cmap;
-		unsigned int index, count, i;
+		/* guard against pulling in bad upstream fix */
+		int index, count, i;
 		u8 red, green, blue;
 
 		if (get_user(index, &c->index) ||
@@ -170,7 +172,8 @@ int sbusfb_ioctl_helper(unsigned long cmd, unsigned long arg,
 		    __get_user(ublue, &c->blue))
 			return -EFAULT;
 
-		if (index + count > cmap->len)
+		if (index < 0 || count < 0 || count > cmap->len ||
+		    index > cmap->len || index > cmap->len - count)
 			return -EINVAL;
 
 		for (i = 0; i < count; i++) {

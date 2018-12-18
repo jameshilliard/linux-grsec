@@ -422,8 +422,8 @@ smb2_clear_stats(struct cifs_tcon *tcon)
 #ifdef CONFIG_CIFS_STATS
 	int i;
 	for (i = 0; i < NUMBER_OF_SMB2_COMMANDS; i++) {
-		atomic_set(&tcon->stats.smb2_stats.smb2_com_sent[i], 0);
-		atomic_set(&tcon->stats.smb2_stats.smb2_com_failed[i], 0);
+		atomic_set_unchecked(&tcon->stats.smb2_stats.smb2_com_sent[i], 0);
+		atomic_set_unchecked(&tcon->stats.smb2_stats.smb2_com_failed[i], 0);
 	}
 #endif
 }
@@ -463,65 +463,65 @@ static void
 smb2_print_stats(struct seq_file *m, struct cifs_tcon *tcon)
 {
 #ifdef CONFIG_CIFS_STATS
-	atomic_t *sent = tcon->stats.smb2_stats.smb2_com_sent;
-	atomic_t *failed = tcon->stats.smb2_stats.smb2_com_failed;
+	atomic_unchecked_t *sent = tcon->stats.smb2_stats.smb2_com_sent;
+	atomic_unchecked_t *failed = tcon->stats.smb2_stats.smb2_com_failed;
 	seq_printf(m, "\nNegotiates: %d sent %d failed",
-		   atomic_read(&sent[SMB2_NEGOTIATE_HE]),
-		   atomic_read(&failed[SMB2_NEGOTIATE_HE]));
+		   atomic_read_unchecked(&sent[SMB2_NEGOTIATE_HE]),
+		   atomic_read_unchecked(&failed[SMB2_NEGOTIATE_HE]));
 	seq_printf(m, "\nSessionSetups: %d sent %d failed",
-		   atomic_read(&sent[SMB2_SESSION_SETUP_HE]),
-		   atomic_read(&failed[SMB2_SESSION_SETUP_HE]));
+		   atomic_read_unchecked(&sent[SMB2_SESSION_SETUP_HE]),
+		   atomic_read_unchecked(&failed[SMB2_SESSION_SETUP_HE]));
 	seq_printf(m, "\nLogoffs: %d sent %d failed",
-		   atomic_read(&sent[SMB2_LOGOFF_HE]),
-		   atomic_read(&failed[SMB2_LOGOFF_HE]));
+		   atomic_read_unchecked(&sent[SMB2_LOGOFF_HE]),
+		   atomic_read_unchecked(&failed[SMB2_LOGOFF_HE]));
 	seq_printf(m, "\nTreeConnects: %d sent %d failed",
-		   atomic_read(&sent[SMB2_TREE_CONNECT_HE]),
-		   atomic_read(&failed[SMB2_TREE_CONNECT_HE]));
+		   atomic_read_unchecked(&sent[SMB2_TREE_CONNECT_HE]),
+		   atomic_read_unchecked(&failed[SMB2_TREE_CONNECT_HE]));
 	seq_printf(m, "\nTreeDisconnects: %d sent %d failed",
-		   atomic_read(&sent[SMB2_TREE_DISCONNECT_HE]),
-		   atomic_read(&failed[SMB2_TREE_DISCONNECT_HE]));
+		   atomic_read_unchecked(&sent[SMB2_TREE_DISCONNECT_HE]),
+		   atomic_read_unchecked(&failed[SMB2_TREE_DISCONNECT_HE]));
 	seq_printf(m, "\nCreates: %d sent %d failed",
-		   atomic_read(&sent[SMB2_CREATE_HE]),
-		   atomic_read(&failed[SMB2_CREATE_HE]));
+		   atomic_read_unchecked(&sent[SMB2_CREATE_HE]),
+		   atomic_read_unchecked(&failed[SMB2_CREATE_HE]));
 	seq_printf(m, "\nCloses: %d sent %d failed",
-		   atomic_read(&sent[SMB2_CLOSE_HE]),
-		   atomic_read(&failed[SMB2_CLOSE_HE]));
+		   atomic_read_unchecked(&sent[SMB2_CLOSE_HE]),
+		   atomic_read_unchecked(&failed[SMB2_CLOSE_HE]));
 	seq_printf(m, "\nFlushes: %d sent %d failed",
-		   atomic_read(&sent[SMB2_FLUSH_HE]),
-		   atomic_read(&failed[SMB2_FLUSH_HE]));
+		   atomic_read_unchecked(&sent[SMB2_FLUSH_HE]),
+		   atomic_read_unchecked(&failed[SMB2_FLUSH_HE]));
 	seq_printf(m, "\nReads: %d sent %d failed",
-		   atomic_read(&sent[SMB2_READ_HE]),
-		   atomic_read(&failed[SMB2_READ_HE]));
+		   atomic_read_unchecked(&sent[SMB2_READ_HE]),
+		   atomic_read_unchecked(&failed[SMB2_READ_HE]));
 	seq_printf(m, "\nWrites: %d sent %d failed",
-		   atomic_read(&sent[SMB2_WRITE_HE]),
-		   atomic_read(&failed[SMB2_WRITE_HE]));
+		   atomic_read_unchecked(&sent[SMB2_WRITE_HE]),
+		   atomic_read_unchecked(&failed[SMB2_WRITE_HE]));
 	seq_printf(m, "\nLocks: %d sent %d failed",
-		   atomic_read(&sent[SMB2_LOCK_HE]),
-		   atomic_read(&failed[SMB2_LOCK_HE]));
+		   atomic_read_unchecked(&sent[SMB2_LOCK_HE]),
+		   atomic_read_unchecked(&failed[SMB2_LOCK_HE]));
 	seq_printf(m, "\nIOCTLs: %d sent %d failed",
-		   atomic_read(&sent[SMB2_IOCTL_HE]),
-		   atomic_read(&failed[SMB2_IOCTL_HE]));
+		   atomic_read_unchecked(&sent[SMB2_IOCTL_HE]),
+		   atomic_read_unchecked(&failed[SMB2_IOCTL_HE]));
 	seq_printf(m, "\nCancels: %d sent %d failed",
-		   atomic_read(&sent[SMB2_CANCEL_HE]),
-		   atomic_read(&failed[SMB2_CANCEL_HE]));
+		   atomic_read_unchecked(&sent[SMB2_CANCEL_HE]),
+		   atomic_read_unchecked(&failed[SMB2_CANCEL_HE]));
 	seq_printf(m, "\nEchos: %d sent %d failed",
-		   atomic_read(&sent[SMB2_ECHO_HE]),
-		   atomic_read(&failed[SMB2_ECHO_HE]));
+		   atomic_read_unchecked(&sent[SMB2_ECHO_HE]),
+		   atomic_read_unchecked(&failed[SMB2_ECHO_HE]));
 	seq_printf(m, "\nQueryDirectories: %d sent %d failed",
-		   atomic_read(&sent[SMB2_QUERY_DIRECTORY_HE]),
-		   atomic_read(&failed[SMB2_QUERY_DIRECTORY_HE]));
+		   atomic_read_unchecked(&sent[SMB2_QUERY_DIRECTORY_HE]),
+		   atomic_read_unchecked(&failed[SMB2_QUERY_DIRECTORY_HE]));
 	seq_printf(m, "\nChangeNotifies: %d sent %d failed",
-		   atomic_read(&sent[SMB2_CHANGE_NOTIFY_HE]),
-		   atomic_read(&failed[SMB2_CHANGE_NOTIFY_HE]));
+		   atomic_read_unchecked(&sent[SMB2_CHANGE_NOTIFY_HE]),
+		   atomic_read_unchecked(&failed[SMB2_CHANGE_NOTIFY_HE]));
 	seq_printf(m, "\nQueryInfos: %d sent %d failed",
-		   atomic_read(&sent[SMB2_QUERY_INFO_HE]),
-		   atomic_read(&failed[SMB2_QUERY_INFO_HE]));
+		   atomic_read_unchecked(&sent[SMB2_QUERY_INFO_HE]),
+		   atomic_read_unchecked(&failed[SMB2_QUERY_INFO_HE]));
 	seq_printf(m, "\nSetInfos: %d sent %d failed",
-		   atomic_read(&sent[SMB2_SET_INFO_HE]),
-		   atomic_read(&failed[SMB2_SET_INFO_HE]));
+		   atomic_read_unchecked(&sent[SMB2_SET_INFO_HE]),
+		   atomic_read_unchecked(&failed[SMB2_SET_INFO_HE]));
 	seq_printf(m, "\nOplockBreaks: %d sent %d failed",
-		   atomic_read(&sent[SMB2_OPLOCK_BREAK_HE]),
-		   atomic_read(&failed[SMB2_OPLOCK_BREAK_HE]));
+		   atomic_read_unchecked(&sent[SMB2_OPLOCK_BREAK_HE]),
+		   atomic_read_unchecked(&failed[SMB2_OPLOCK_BREAK_HE]));
 #endif
 }
 
@@ -1881,6 +1881,46 @@ struct smb_version_values smb21_values = {
 	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
 	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
 	.create_lease_size = sizeof(struct create_lease),
+};
+
+struct smb_version_values smb3any_values = {
+	.version_string = SMB3ANY_VERSION_STRING,
+	.protocol_id = SMB302_PROT_ID, /* doesn't matter, send protocol array */
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU | SMB2_GLOBAL_CAP_PERSISTENT_HANDLES | SMB2_GLOBAL_CAP_ENCRYPTION,
+	.large_lock_type = 0,
+	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
+	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
+	.unlock_lock_type = SMB2_LOCKFLAG_UNLOCK,
+	.header_size = sizeof(struct smb2_hdr),
+	.max_header_size = MAX_SMB2_HDR_SIZE,
+	.read_rsp_size = sizeof(struct smb2_read_rsp) - 1,
+	.lock_cmd = SMB2_LOCK,
+	.cap_unix = 0,
+	.cap_nt_find = SMB2_NT_FIND,
+	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
+};
+
+struct smb_version_values smbdefault_values = {
+	.version_string = SMBDEFAULT_VERSION_STRING,
+	.protocol_id = SMB302_PROT_ID, /* doesn't matter, send protocol array */
+	.req_capabilities = SMB2_GLOBAL_CAP_DFS | SMB2_GLOBAL_CAP_LEASING | SMB2_GLOBAL_CAP_LARGE_MTU | SMB2_GLOBAL_CAP_PERSISTENT_HANDLES | SMB2_GLOBAL_CAP_ENCRYPTION,
+	.large_lock_type = 0,
+	.exclusive_lock_type = SMB2_LOCKFLAG_EXCLUSIVE_LOCK,
+	.shared_lock_type = SMB2_LOCKFLAG_SHARED_LOCK,
+	.unlock_lock_type = SMB2_LOCKFLAG_UNLOCK,
+	.header_size = sizeof(struct smb2_hdr),
+	.max_header_size = MAX_SMB2_HDR_SIZE,
+	.read_rsp_size = sizeof(struct smb2_read_rsp) - 1,
+	.lock_cmd = SMB2_LOCK,
+	.cap_unix = 0,
+	.cap_nt_find = SMB2_NT_FIND,
+	.cap_large_files = SMB2_LARGE_FILES,
+	.signing_enabled = SMB2_NEGOTIATE_SIGNING_ENABLED | SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.signing_required = SMB2_NEGOTIATE_SIGNING_REQUIRED,
+	.create_lease_size = sizeof(struct create_lease_v2),
 };
 
 struct smb_version_values smb30_values = {

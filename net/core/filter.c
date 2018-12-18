@@ -584,7 +584,11 @@ do_pass:
 
 		/* Unknown instruction. */
 		default:
-			goto err;
+			WARN(1, KERN_ALERT "Unknown sock filter code:%u jt:%u tf:%u k:%u\n",
+				       fp->code, fp->jt, fp->jf, fp->k);
+			kfree(addrs);
+			BUG();
+			return -EINVAL;
 		}
 
 		insn++;
@@ -628,7 +632,7 @@ static int check_load_and_stores(const struct sock_filter *filter, int flen)
 	u16 *masks, memvalid = 0; /* One bit per cell, 16 cells */
 	int pc, ret = 0;
 
-	BUILD_BUG_ON(BPF_MEMWORDS > 16);
+	BUILD_BUG_ON(BPF_MEMWORDS != 16);
 
 	masks = kmalloc_array(flen, sizeof(*masks), GFP_KERNEL);
 	if (!masks)
@@ -1064,7 +1068,7 @@ int bpf_prog_create(struct bpf_prog **pfp, struct sock_fprog_kern *fprog)
 	if (!fp)
 		return -ENOMEM;
 
-	memcpy(fp->insns, fprog->filter, fsize);
+	memcpy(fp->insns, (void __force_kernel *)fprog->filter, fsize);
 
 	fp->len = fprog->len;
 	/* Since unattached filters are not copied back to user
@@ -1609,6 +1613,7 @@ static u64 bpf_skb_set_tunnel_key(u64 r1, u64 r2, u64 size, u64 flags, u64 r5)
 	skb_dst_set(skb, (struct dst_entry *) md);
 
 	info = &md->u.tun_info;
+	memset(info, 0, sizeof(*info));
 	info->mode = IP_TUNNEL_INFO_TX;
 	info->key.tun_flags = TUNNEL_KEY;
 	info->key.tun_id = cpu_to_be64(from->tunnel_id);

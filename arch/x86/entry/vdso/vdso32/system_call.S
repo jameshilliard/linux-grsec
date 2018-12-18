@@ -4,7 +4,7 @@
 
 #include <asm/dwarf2.h>
 #include <asm/cpufeatures.h>
-#include <asm/alternative-asm.h>
+#include <asm/nospec-branch.h>
 
 /*
  * First get the common code for the sigreturn entry points.

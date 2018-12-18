@@ -158,7 +158,7 @@ void *memdup_user(const void __user *src, size_t len)
 	 * cause pagefault, which makes it pointless to use GFP_NOFS
 	 * or GFP_ATOMIC.
 	 */
-	p = kmalloc_track_caller(len, GFP_KERNEL);
+	p = kmalloc_track_caller(len, GFP_KERNEL|GFP_USERCOPY);
 	if (!p)
 		return ERR_PTR(-ENOMEM);
 
@@ -200,6 +200,37 @@ char *strndup_user(const char __user *s, long n)
 }
 EXPORT_SYMBOL(strndup_user);
 
+/**
+ * memdup_user_nul - duplicate memory region from user space and NUL-terminate
+ *
+ * @src: source address in user space
+ * @len: number of bytes to copy
+ *
+ * Returns an ERR_PTR() on failure.
+ */
+void *memdup_user_nul(const void __user *src, size_t len)
+{
+	char *p;
+
+	/*
+	 * Always use GFP_KERNEL, since copy_from_user() can sleep and
+	 * cause pagefault, which makes it pointless to use GFP_NOFS
+	 * or GFP_ATOMIC.
+	 */
+	p = kmalloc_track_caller(len + 1, GFP_KERNEL);
+	if (!p)
+		return ERR_PTR(-ENOMEM);
+
+	if (copy_from_user(p, src, len)) {
+		kfree(p);
+		return ERR_PTR(-EFAULT);
+	}
+	p[len] = '\0';
+
+	return p;
+}
+EXPORT_SYMBOL(memdup_user_nul);
+
 void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct vm_area_struct *prev, struct rb_node *rb_parent)
 {
@@ -223,7 +254,7 @@ void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 }
 
 /* Check if the vma is being used as a stack by this task */
-int vma_is_stack_for_task(struct vm_area_struct *vma, struct task_struct *t)
+bool vma_is_stack_for_task(struct vm_area_struct *vma, struct task_struct *t)
 {
 	return (vma->vm_start <= KSTK_ESP(t) && vma->vm_end >= KSTK_ESP(t));
 }
@@ -232,6 +263,12 @@ int vma_is_stack_for_task(struct vm_area_struct *vma, struct task_struct *t)
 void arch_pick_mmap_layout(struct mm_struct *mm)
 {
 	mm->mmap_base = TASK_UNMAPPED_BASE;
+
+#ifdef CONFIG_PAX_RANDMMAP
+	if (mm->pax_flags & MF_PAX_RANDMMAP)
+		mm->mmap_base += mm->delta_mmap;
+#endif
+
 	mm->get_unmapped_area = arch_get_unmapped_area;
 }
 #endif
@@ -292,10 +329,23 @@ unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 
 	ret = security_mmap_file(file, prot, flag);
 	if (!ret) {
+#ifdef CONFIG_GRKERNSEC_RWXMAP_LOG
+		void (*handle_mmap)(struct file *file) = NULL;
+#endif
 		down_write(&mm->mmap_sem);
 		ret = do_mmap_pgoff(file, addr, len, prot, flag, pgoff,
 				    &populate);
+#ifdef CONFIG_GRKERNSEC_RWXMAP_LOG
+		if (!IS_ERR_VALUE(ret) && (mm->pax_flags & MF_PAX_MPROTECT) &&
+		    file && !pgoff && (prot & PROT_EXEC) && mm->binfmt &&
+		    mm->binfmt->handle_mmap)
+			handle_mmap = mm->binfmt->handle_mmap;
+#endif
 		up_write(&mm->mmap_sem);
+#ifdef CONFIG_GRKERNSEC_RWXMAP_LOG
+		if (handle_mmap)
+			handle_mmap(file);
+#endif
 		if (populate)
 			mm_populate(ret, populate);
 	}
@@ -433,6 +483,9 @@ int get_cmdline(struct task_struct *task, char *buffer, int buflen)
 		goto out;
 	if (!mm->arg_end)
 		goto out_mm;	/* Shh! No looking before we're done */
+
+	if (gr_acl_handle_procpidmem(task))
+		goto out_mm;
 
 	down_read(&mm->mmap_sem);
 	arg_start = mm->arg_start;

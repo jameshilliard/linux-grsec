@@ -854,6 +854,7 @@ static inline void rcu_preempt_sleep_check(void)
  * read-side critical sections may be preempted and they may also block, but
  * only when acquiring spinlocks that are subject to priority inheritance.
  */
+static inline void rcu_read_lock(void) __acquires(RCU);
 static inline void rcu_read_lock(void)
 {
 	__rcu_read_lock();
@@ -908,6 +909,7 @@ static inline void rcu_read_lock(void)
  *
  * See rcu_read_lock() for more information.
  */
+static inline void rcu_read_unlock(void) __releases(RCU);
 static inline void rcu_read_unlock(void)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(),
@@ -934,6 +936,7 @@ static inline void rcu_read_unlock(void)
  * rcu_read_unlock_bh() from one task if the matching rcu_read_lock_bh()
  * was invoked from some other task.
  */
+static inline void rcu_read_lock_bh(void) __acquires(RCU_BH);
 static inline void rcu_read_lock_bh(void)
 {
 	local_bh_disable();
@@ -948,6 +951,7 @@ static inline void rcu_read_lock_bh(void)
  *
  * See rcu_read_lock_bh() for more information.
  */
+static inline void rcu_read_unlock_bh(void) __releases(RCU_BH);
 static inline void rcu_read_unlock_bh(void)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(),
@@ -970,6 +974,7 @@ static inline void rcu_read_unlock_bh(void)
  * rcu_read_unlock_sched() from process context if the matching
  * rcu_read_lock_sched() was invoked from an NMI handler.
  */
+static inline void rcu_read_lock_sched(void) __acquires(RCU_SCHED);
 static inline void rcu_read_lock_sched(void)
 {
 	preempt_disable();
@@ -980,6 +985,7 @@ static inline void rcu_read_lock_sched(void)
 }
 
 /* Used by lockdep and tracing: cannot be traced, cannot call lockdep. */
+static inline notrace void rcu_read_lock_sched_notrace(void) __acquires(RCU_SCHED);
 static inline notrace void rcu_read_lock_sched_notrace(void)
 {
 	preempt_disable_notrace();
@@ -991,6 +997,7 @@ static inline notrace void rcu_read_lock_sched_notrace(void)
  *
  * See rcu_read_lock_sched for more information.
  */
+static inline void rcu_read_unlock_sched(void) __releases(RCU_SCHED);
 static inline void rcu_read_unlock_sched(void)
 {
 	RCU_LOCKDEP_WARN(!rcu_is_watching(),
@@ -1001,6 +1008,7 @@ static inline void rcu_read_unlock_sched(void)
 }
 
 /* Used by lockdep and tracing: cannot be traced, cannot call lockdep. */
+static inline notrace void rcu_read_unlock_sched_notrace(void) __releases(RCU_SCHED);
 static inline notrace void rcu_read_unlock_sched_notrace(void)
 {
 	__release(RCU_SCHED);

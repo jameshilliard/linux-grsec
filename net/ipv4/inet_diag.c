@@ -51,8 +51,7 @@ static DEFINE_MUTEX(inet_diag_table_mutex);
 static const struct inet_diag_handler *inet_diag_lock_handler(int proto)
 {
 	if (!inet_diag_table[proto])
-		request_module("net-pf-%d-proto-%d-type-%d-%d", PF_NETLINK,
-			       NETLINK_SOCK_DIAG, AF_INET, proto);
+		sock_load_diag_module(AF_INET, proto);
 
 	mutex_lock(&inet_diag_table_mutex);
 	if (!inet_diag_table[proto])
@@ -962,7 +961,7 @@ static int inet_diag_rcv_msg_compat(struct sk_buff *skb, struct nlmsghdr *nlh)
 				return -EINVAL;
 		}
 		{
-			struct netlink_dump_control c = {
+			static struct netlink_dump_control c = {
 				.dump = inet_diag_dump_compat,
 			};
 			return netlink_dump_start(net->diag_nlsk, skb, nlh, &c);
@@ -992,7 +991,7 @@ static int inet_diag_handler_dump(struct sk_buff *skb, struct nlmsghdr *h)
 				return -EINVAL;
 		}
 		{
-			struct netlink_dump_control c = {
+			static struct netlink_dump_control c = {
 				.dump = inet_diag_dump,
 			};
 			return netlink_dump_start(net->diag_nlsk, skb, h, &c);

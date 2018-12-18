@@ -64,6 +64,7 @@ asmlinkage void ret_from_kernel_thread(void) __asm__("ret_from_kernel_thread");
 unsigned long thread_saved_pc(struct task_struct *tsk)
 {
 	return ((unsigned long *)tsk->thread.sp)[3];
+//XXX	return tsk->thread.eip;
 }
 
 void __show_regs(struct pt_regs *regs, int all)
@@ -76,16 +77,15 @@ void __show_regs(struct pt_regs *regs, int all)
 	if (user_mode(regs)) {
 		sp = regs->sp;
 		ss = regs->ss & 0xffff;
-		gs = get_user_gs(regs);
 	} else {
 		sp = kernel_stack_pointer(regs);
 		savesegment(ss, ss);
-		savesegment(gs, gs);
 	}
+	gs = get_user_gs(regs);
 
 	printk(KERN_DEFAULT "EIP: %04x:[<%08lx>] EFLAGS: %08lx CPU: %d\n",
 			(u16)regs->cs, regs->ip, regs->flags,
-			smp_processor_id());
+			raw_smp_processor_id());
 	print_symbol("EIP is at %s\n", regs->ip);
 
 	printk(KERN_DEFAULT "EAX: %08lx EBX: %08lx ECX: %08lx EDX: %08lx\n",
@@ -132,21 +132,22 @@ void release_thread(struct task_struct *dead_task)
 int copy_thread_tls(unsigned long clone_flags, unsigned long sp,
 	unsigned long arg, struct task_struct *p, unsigned long tls)
 {
-	struct pt_regs *childregs = task_pt_regs(p);
+	struct pt_regs *childregs = task_stack_page(p) + THREAD_SIZE - sizeof(struct pt_regs) - 8;
 	struct task_struct *tsk;
 	int err;
 
 	p->thread.sp = (unsigned long) childregs;
 	p->thread.sp0 = (unsigned long) (childregs+1);
+	p->tinfo.lowest_stack = (unsigned long)task_stack_page(p) + 2 * sizeof(unsigned long);
 	memset(p->thread.ptrace_bps, 0, sizeof(p->thread.ptrace_bps));
 
 	if (unlikely(p->flags & PF_KTHREAD)) {
 		/* kernel thread */
 		memset(childregs, 0, sizeof(struct pt_regs));
 		p->thread.ip = (unsigned long) ret_from_kernel_thread;
-		task_user_gs(p) = __KERNEL_STACK_CANARY;
-		childregs->ds = __USER_DS;
-		childregs->es = __USER_DS;
+		savesegment(gs, childregs->gs);
+		childregs->ds = __KERNEL_DS;
+		childregs->es = __KERNEL_DS;
 		childregs->fs = __KERNEL_PERCPU;
 		childregs->bx = sp;	/* function */
 		childregs->bp = arg;
@@ -246,7 +247,7 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	struct fpu *prev_fpu = &prev->fpu;
 	struct fpu *next_fpu = &next->fpu;
 	int cpu = smp_processor_id();
-	struct tss_struct *tss = &per_cpu(cpu_tss, cpu);
+	struct tss_struct *tss = cpu_tss + cpu;
 	fpu_switch_t fpu_switch;
 
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
@@ -264,6 +265,10 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 * running inside of a hypervisor layer.
 	 */
 	lazy_save_gs(prev->gs);
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	__set_fs(task_thread_info(next_p)->addr_limit);
+#endif
 
 	/*
 	 * Load the per-thread Thread-Local Storage descriptor.
@@ -300,9 +305,9 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	 * current_thread_info().
 	 */
 	load_sp0(tss, next);
-	this_cpu_write(cpu_current_top_of_stack,
-		       (unsigned long)task_stack_page(next_p) +
-		       THREAD_SIZE);
+	this_cpu_write(current_task, next_p);
+	this_cpu_write(current_tinfo, &next_p->tinfo);
+	this_cpu_write(cpu_current_top_of_stack, next->sp0);
 
 	/*
 	 * Restore %gs if needed (which is common)
@@ -311,8 +316,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		lazy_load_gs(next->gs);
 
 	switch_fpu_finish(next_fpu, fpu_switch);
-
-	this_cpu_write(current_task, next_p);
 
 	return prev_p;
 }

@@ -10,7 +10,7 @@
 #define dotraplinkage __visible
 
 asmlinkage void divide_error(void);
-asmlinkage void debug(void);
+asmlinkage void int1(void);
 asmlinkage void nmi(void);
 asmlinkage void int3(void);
 asmlinkage void xen_debug(void);
@@ -38,6 +38,10 @@ asmlinkage void machine_check(void);
 #endif /* CONFIG_X86_MCE */
 asmlinkage void simd_coprocessor_error(void);
 
+#ifdef CONFIG_PAX_REFCOUNT
+asmlinkage void refcount_error(void);
+#endif
+
 #ifdef CONFIG_TRACING
 asmlinkage void trace_page_fault(void);
 #define trace_stack_segment stack_segment
@@ -54,6 +58,7 @@ asmlinkage void trace_page_fault(void);
 #define trace_alignment_check alignment_check
 #define trace_simd_coprocessor_error simd_coprocessor_error
 #define trace_async_page_fault async_page_fault
+#define trace_refcount_error refcount_error
 #endif
 
 dotraplinkage void do_divide_error(struct pt_regs *, long);
@@ -108,7 +113,7 @@ extern int panic_on_unrecovered_nmi;
 
 void math_emulate(struct math_emu_info *);
 #ifndef CONFIG_X86_32
-asmlinkage void smp_thermal_interrupt(void);
+asmlinkage void smp_thermal_interrupt(struct pt_regs *regs);
 asmlinkage void smp_threshold_interrupt(void);
 asmlinkage void smp_deferred_error_interrupt(void);
 #endif
@@ -140,6 +145,9 @@ enum {
 	X86_TRAP_AC,		/* 17, Alignment Check */
 	X86_TRAP_MC,		/* 18, Machine Check */
 	X86_TRAP_XF,		/* 19, SIMD Floating-Point Exception */
+	X86_TRAP_VE,		/* 20, Virtualization Exception */
+	X86_TRAP_CP,		/* 21, Control Protection Exception */
+	X86_TRAP_SX = 30,	/* 30, Security Exception */
 	X86_TRAP_IRET = 32,	/* 32, IRET Exception */
 };
 

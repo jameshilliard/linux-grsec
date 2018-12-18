@@ -999,7 +999,7 @@ static struct packet_type dsa_pack_type __read_mostly = {
 	.func	= dsa_switch_rcv,
 };
 
-static struct notifier_block dsa_netdevice_nb __read_mostly = {
+static struct notifier_block dsa_netdevice_nb = {
 	.notifier_call	= dsa_slave_netdevice_event,
 };
 

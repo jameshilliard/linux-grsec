@@ -188,8 +188,8 @@ ext4_listxattr(struct dentry *dentry, char *buffer, size_t size)
 }
 
 static int
-ext4_xattr_check_names(struct ext4_xattr_entry *entry, void *end,
-		       void *value_start)
+ext4_xattr_check_entries(struct ext4_xattr_entry *entry, void *end,
+			 void *value_start)
 {
 	struct ext4_xattr_entry *e = entry;
 
@@ -228,8 +228,8 @@ ext4_xattr_check_block(struct inode *inode, struct buffer_head *bh)
 
 	if (!ext4_xattr_block_csum_verify(inode, bh->b_blocknr, BHDR(bh)))
 		return -EFSBADCRC;
-	error = ext4_xattr_check_names(BFIRST(bh), bh->b_data + bh->b_size,
-				       bh->b_data);
+	error = ext4_xattr_check_entries(BFIRST(bh), bh->b_data + bh->b_size,
+					 bh->b_data);
 	if (!error)
 		set_buffer_verified(bh);
 	return error;
@@ -239,13 +239,12 @@ static int
 __xattr_check_inode(struct inode *inode, struct ext4_xattr_ibody_header *header,
 			 void *end, const char *function, unsigned int line)
 {
-	struct ext4_xattr_entry *entry = IFIRST(header);
 	int error = -EFSCORRUPTED;
 
-	if (((void *) header >= end) ||
-	    (header->h_magic != le32_to_cpu(EXT4_XATTR_MAGIC)))
+	if (end - (void *)header < sizeof(*header) + sizeof(u32) ||
+	    (header->h_magic != cpu_to_le32(EXT4_XATTR_MAGIC)))
 		goto errout;
-	error = ext4_xattr_check_names(entry, end, entry);
+	error = ext4_xattr_check_entries(IFIRST(header), end, IFIRST(header));
 errout:
 	if (error)
 		__ext4_error_inode(inode, function, line, 0,
@@ -422,7 +421,7 @@ static int
 ext4_xattr_list_entries(struct dentry *dentry, struct ext4_xattr_entry *entry,
 			char *buffer, size_t buffer_size)
 {
-	size_t rest = buffer_size;
+	size_t rest = buffer_size, total_size = 0;
 
 	for (; !IS_LAST_ENTRY(entry); entry = EXT4_XATTR_NEXT(entry)) {
 		const struct xattr_handler *handler =
@@ -438,9 +437,10 @@ ext4_xattr_list_entries(struct dentry *dentry, struct ext4_xattr_entry *entry,
 				buffer += size;
 			}
 			rest -= size;
+			total_size += size;
 		}
 	}
-	return buffer_size - rest;
+	return total_size;
 }
 
 static int

@@ -203,7 +203,7 @@ static int dt_irqdomain_alloc(struct irq_domain *domain, unsigned int virq,
 	struct irq_fwspec *fwspec = (struct irq_fwspec *)arg;
 	struct of_ioapic_type *it;
 	struct irq_alloc_info tmp;
-	int type_index;
+	size_t type_index;
 
 	if (WARN_ON(fwspec->param_count < 2))
 		return -EINVAL;

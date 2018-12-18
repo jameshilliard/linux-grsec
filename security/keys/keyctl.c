@@ -99,7 +99,7 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
 
 	if (plen) {
 		ret = -ENOMEM;
-		payload = kmalloc(plen, GFP_KERNEL | __GFP_NOWARN);
+		payload = kmalloc(plen, GFP_KERNEL | GFP_USERCOPY | __GFP_NOWARN);
 		if (!payload) {
 			if (plen <= PAGE_SIZE)
 				goto error2;
@@ -135,7 +135,10 @@ SYSCALL_DEFINE5(add_key, const char __user *, _type,
 
 	key_ref_put(keyring_ref);
  error3:
-	kvfree(payload);
+	if (payload) {
+		memzero_explicit(payload, plen);
+		kvfree(payload);
+	}
  error2:
 	kfree(description);
  error:
@@ -329,7 +332,7 @@ long keyctl_update_key(key_serial_t id,
 	payload = NULL;
 	if (plen) {
 		ret = -ENOMEM;
-		payload = kmalloc(plen, GFP_KERNEL);
+		payload = kmalloc(plen, GFP_KERNEL | GFP_USERCOPY);
 		if (!payload)
 			goto error;
 
@@ -350,7 +353,7 @@ long keyctl_update_key(key_serial_t id,
 
 	key_ref_put(key_ref);
 error2:
-	kfree(payload);
+	kzfree(payload);
 error:
 	return ret;
 }
@@ -593,7 +596,7 @@ okay:
 
 	/* calculate how much information we're going to return */
 	ret = -ENOMEM;
-	infobuf = kasprintf(GFP_KERNEL,
+	infobuf = kasprintf(GFP_KERNEL | GFP_USERCOPY,
 			    "%s;%d;%d;%08x;",
 			    key->type->name,
 			    from_kuid_munged(current_user_ns(), key->uid),
@@ -747,7 +750,7 @@ long keyctl_read_key(key_serial_t keyid, char __user *buffer, size_t buflen)
 	if (ret == 0)
 		goto can_read_key;
 	if (ret != -EACCES)
-		goto error;
+		goto error2;
 
 	/* we can't; see if it's searchable from this process's keyrings
 	 * - we automatically take account of the fact that it may be
@@ -1045,7 +1048,7 @@ long keyctl_instantiate_key_common(key_serial_t id,
 
 	if (from) {
 		ret = -ENOMEM;
-		payload = kmalloc(plen, GFP_KERNEL);
+		payload = kmalloc(plen, GFP_KERNEL | GFP_USERCOPY);
 		if (!payload) {
 			if (plen <= PAGE_SIZE)
 				goto error;
@@ -1077,7 +1080,10 @@ long keyctl_instantiate_key_common(key_serial_t id,
 		keyctl_change_reqkey_auth(NULL);
 
 error2:
-	kvfree(payload);
+	if (payload) {
+		memzero_explicit(payload, plen);
+		kvfree(payload);
+	}
 error:
 	return ret;
 }

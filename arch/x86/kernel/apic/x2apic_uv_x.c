@@ -374,7 +374,7 @@ static int uv_probe(void)
 	return apic == &apic_x2apic_uv_x;
 }
 
-static struct apic __refdata apic_x2apic_uv_x = {
+static struct apic apic_x2apic_uv_x __read_only = {
 
 	.name				= "UV large system",
 	.probe				= uv_probe,

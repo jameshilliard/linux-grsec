@@ -11,6 +11,7 @@
 #define Elf_Sym			ElfW(Sym)
 
 static Elf_Ehdr ehdr;
+static Elf_Phdr *phdr;
 
 struct relocs {
 	uint32_t	*offset;
@@ -45,6 +46,7 @@ static const char * const sym_regex_kernel[S_NSYMTYPES] = {
 	"^(xen_irq_disable_direct_reloc$|"
 	"xen_save_fl_direct_reloc$|"
 	"VDSO|"
+	"__rap_hash_|"
 	"__crc_)",
 
 /*
@@ -386,9 +388,39 @@ static void read_ehdr(FILE *fp)
 	}
 }
 
+static void read_phdrs(FILE *fp)
+{
+	unsigned int i;
+
+	phdr = calloc(ehdr.e_phnum, sizeof(Elf_Phdr));
+	if (!phdr) {
+		die("Unable to allocate %d program headers\n",
+		    ehdr.e_phnum);
+	}
+	if (fseek(fp, ehdr.e_phoff, SEEK_SET) < 0) {
+		die("Seek to %d failed: %s\n",
+			ehdr.e_phoff, strerror(errno));
+	}
+	if (fread(phdr, sizeof(*phdr), ehdr.e_phnum, fp) != ehdr.e_phnum) {
+		die("Cannot read ELF program headers: %s\n",
+			strerror(errno));
+	}
+	for(i = 0; i < ehdr.e_phnum; i++) {
+		phdr[i].p_type      = elf_word_to_cpu(phdr[i].p_type);
+		phdr[i].p_offset    = elf_off_to_cpu(phdr[i].p_offset);
+		phdr[i].p_vaddr     = elf_addr_to_cpu(phdr[i].p_vaddr);
+		phdr[i].p_paddr     = elf_addr_to_cpu(phdr[i].p_paddr);
+		phdr[i].p_filesz    = elf_word_to_cpu(phdr[i].p_filesz);
+		phdr[i].p_memsz     = elf_word_to_cpu(phdr[i].p_memsz);
+		phdr[i].p_flags     = elf_word_to_cpu(phdr[i].p_flags);
+		phdr[i].p_align     = elf_word_to_cpu(phdr[i].p_align);
+	}
+
+}
+
 static void read_shdrs(FILE *fp)
 {
-	int i;
+	unsigned int i;
 	Elf_Shdr shdr;
 
 	secs = calloc(ehdr.e_shnum, sizeof(struct section));
@@ -423,7 +455,7 @@ static void read_shdrs(FILE *fp)
 
 static void read_strtabs(FILE *fp)
 {
-	int i;
+	unsigned int i;
 	for (i = 0; i < ehdr.e_shnum; i++) {
 		struct section *sec = &secs[i];
 		if (sec->shdr.sh_type != SHT_STRTAB) {
@@ -448,7 +480,7 @@ static void read_strtabs(FILE *fp)
 
 static void read_symtabs(FILE *fp)
 {
-	int i,j;
+	unsigned int i,j;
 	for (i = 0; i < ehdr.e_shnum; i++) {
 		struct section *sec = &secs[i];
 		if (sec->shdr.sh_type != SHT_SYMTAB) {
@@ -479,9 +511,11 @@ static void read_symtabs(FILE *fp)
 }
 
 
-static void read_relocs(FILE *fp)
+static void read_relocs(FILE *fp, int use_real_mode)
 {
-	int i,j;
+	unsigned int i,j;
+	uint32_t base;
+
 	for (i = 0; i < ehdr.e_shnum; i++) {
 		struct section *sec = &secs[i];
 		if (sec->shdr.sh_type != SHT_REL_TYPE) {
@@ -501,9 +535,22 @@ static void read_relocs(FILE *fp)
 			die("Cannot read symbol table: %s\n",
 				strerror(errno));
 		}
+		base = 0;
+
+#ifdef CONFIG_X86_32
+		for (j = 0; !use_real_mode && j < ehdr.e_phnum; j++) {
+			if (phdr[j].p_type != PT_LOAD )
+				continue;
+			if (secs[sec->shdr.sh_info].shdr.sh_offset < phdr[j].p_offset || secs[sec->shdr.sh_info].shdr.sh_offset >= phdr[j].p_offset + phdr[j].p_filesz)
+				continue;
+			base = CONFIG_PAGE_OFFSET + phdr[j].p_paddr - phdr[j].p_vaddr;
+			break;
+		}
+#endif
+
 		for (j = 0; j < sec->shdr.sh_size/sizeof(Elf_Rel); j++) {
 			Elf_Rel *rel = &sec->reltab[j];
-			rel->r_offset = elf_addr_to_cpu(rel->r_offset);
+			rel->r_offset = elf_addr_to_cpu(rel->r_offset) + base;
 			rel->r_info   = elf_xword_to_cpu(rel->r_info);
 #if (SHT_REL_TYPE == SHT_RELA)
 			rel->r_addend = elf_xword_to_cpu(rel->r_addend);
@@ -515,7 +562,7 @@ static void read_relocs(FILE *fp)
 
 static void print_absolute_symbols(void)
 {
-	int i;
+	unsigned int i;
 	const char *format;
 
 	if (ELF_BITS == 64)
@@ -528,7 +575,7 @@ static void print_absolute_symbols(void)
 	for (i = 0; i < ehdr.e_shnum; i++) {
 		struct section *sec = &secs[i];
 		char *sym_strtab;
-		int j;
+		unsigned int j;
 
 		if (sec->shdr.sh_type != SHT_SYMTAB) {
 			continue;
@@ -555,7 +602,7 @@ static void print_absolute_symbols(void)
 
 static void print_absolute_relocs(void)
 {
-	int i, printed = 0;
+	unsigned int i, printed = 0;
 	const char *format;
 
 	if (ELF_BITS == 64)
@@ -568,7 +615,7 @@ static void print_absolute_relocs(void)
 		struct section *sec_applies, *sec_symtab;
 		char *sym_strtab;
 		Elf_Sym *sh_symtab;
-		int j;
+		unsigned int j;
 		if (sec->shdr.sh_type != SHT_REL_TYPE) {
 			continue;
 		}
@@ -643,15 +690,15 @@ static void add_reloc(struct relocs *r, uint32_t offset)
 }
 
 static void walk_relocs(int (*process)(struct section *sec, Elf_Rel *rel,
-			Elf_Sym *sym, const char *symname))
+			Elf_Sym *sym, const char *symname, int kernexec), int kernexec)
 {
-	int i;
+	unsigned int i;
 	/* Walk through the relocations */
 	for (i = 0; i < ehdr.e_shnum; i++) {
 		char *sym_strtab;
 		Elf_Sym *sh_symtab;
 		struct section *sec_applies, *sec_symtab;
-		int j;
+		unsigned int j;
 		struct section *sec = &secs[i];
 
 		if (sec->shdr.sh_type != SHT_REL_TYPE) {
@@ -669,7 +716,7 @@ static void walk_relocs(int (*process)(struct section *sec, Elf_Rel *rel,
 			Elf_Sym *sym = &sh_symtab[ELF_R_SYM(rel->r_info)];
 			const char *symname = sym_name(sym_strtab, sym);
 
-			process(sec, rel, sym, symname);
+			process(sec, rel, sym, symname, kernexec);
 		}
 	}
 }
@@ -697,7 +744,7 @@ static void walk_relocs(int (*process)(struct section *sec, Elf_Rel *rel,
  * kernel data and does not require special treatment.
  *
  */
-static int per_cpu_shndx	= -1;
+static unsigned int per_cpu_shndx = ~0;
 static Elf_Addr per_cpu_load_addr;
 
 static void percpu_init(void)
@@ -748,7 +795,7 @@ static int is_percpu_sym(ElfW(Sym) *sym, const char *symname)
 
 
 static int do_reloc64(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
-		      const char *symname)
+		      const char *symname, int kernexec)
 {
 	unsigned r_type = ELF64_R_TYPE(rel->r_info);
 	ElfW(Addr) offset = rel->r_offset;
@@ -829,10 +876,27 @@ static int do_reloc64(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
 #else
 
 static int do_reloc32(struct section *sec, Elf_Rel *rel, Elf_Sym *sym,
-		      const char *symname)
+		      const char *symname, int kernexec)
 {
 	unsigned r_type = ELF32_R_TYPE(rel->r_info);
 	int shn_abs = (sym->st_shndx == SHN_ABS) && !is_reloc(S_REL, symname);
+	char *sym_strtab = sec->link->link->strtab;
+
+	/* Don't relocate actual per-cpu variables, they are absolute indices, not addresses */
+	if (!strcmp(sec_name(sym->st_shndx), ".data..percpu") && strcmp(sym_name(sym_strtab, sym), "__per_cpu_load"))
+		return 0;
+
+	if (kernexec) {
+		/* Don't relocate actual code, they are relocated implicitly by the base address of KERNEL_CS */
+		if (!strcmp(sec_name(sym->st_shndx), ".text.end") && !strcmp(sym_name(sym_strtab, sym), "_etext"))
+			return 0;
+		if (!strcmp(sec_name(sym->st_shndx), ".init.text"))
+			return 0;
+		if (!strcmp(sec_name(sym->st_shndx), ".exit.text"))
+			return 0;
+		if (!strcmp(sec_name(sym->st_shndx), ".text") && strcmp(sym_name(sym_strtab, sym), "__LOAD_PHYSICAL_ADDR"))
+			return 0;
+	}
 
 	switch (r_type) {
 	case R_386_NONE:
@@ -872,7 +936,7 @@ static int do_reloc32(struct section *sec, Elf_Rel *rel, Elf_Sym *sym,
 }
 
 static int do_reloc_real(struct section *sec, Elf_Rel *rel, Elf_Sym *sym,
-			 const char *symname)
+			 const char *symname, int kernexec)
 {
 	unsigned r_type = ELF32_R_TYPE(rel->r_info);
 	int shn_abs = (sym->st_shndx == SHN_ABS) && !is_reloc(S_REL, symname);
@@ -969,12 +1033,12 @@ static int write32_as_text(uint32_t v, FILE *f)
 	return fprintf(f, "\t.long 0x%08"PRIx32"\n", v) > 0 ? 0 : -1;
 }
 
-static void emit_relocs(int as_text, int use_real_mode)
+static void emit_relocs(int as_text, int use_real_mode, int kernexec)
 {
-	int i;
+	unsigned int i;
 	int (*write_reloc)(uint32_t, FILE *) = write32;
 	int (*do_reloc)(struct section *sec, Elf_Rel *rel, Elf_Sym *sym,
-			const char *symname);
+			const char *symname, int kernexec);
 
 #if ELF_BITS == 64
 	if (!use_real_mode)
@@ -989,7 +1053,7 @@ static void emit_relocs(int as_text, int use_real_mode)
 #endif
 
 	/* Collect up the relocations */
-	walk_relocs(do_reloc);
+	walk_relocs(do_reloc, kernexec);
 
 	if (relocs16.count && !use_real_mode)
 		die("Segment relocations found but --realmode not specified\n");
@@ -1054,7 +1118,7 @@ static void emit_relocs(int as_text, int use_real_mode)
  * different orders we use the section names in the output.
  */
 static int do_reloc_info(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
-				const char *symname)
+				const char *symname, int kernexec)
 {
 	printf("%s\t%s\t%s\t%s\n",
 		sec_name(sec->shdr.sh_info),
@@ -1064,10 +1128,10 @@ static int do_reloc_info(struct section *sec, Elf_Rel *rel, ElfW(Sym) *sym,
 	return 0;
 }
 
-static void print_reloc_info(void)
+static void print_reloc_info(int kernexec)
 {
 	printf("reloc section\treloc type\tsymbol\tsymbol section\n");
-	walk_relocs(do_reloc_info);
+	walk_relocs(do_reloc_info, kernexec);
 }
 
 #if ELF_BITS == 64
@@ -1078,14 +1142,15 @@ static void print_reloc_info(void)
 
 void process(FILE *fp, int use_real_mode, int as_text,
 	     int show_absolute_syms, int show_absolute_relocs,
-	     int show_reloc_info)
+	     int show_reloc_info, int kernexec)
 {
 	regex_init(use_real_mode);
 	read_ehdr(fp);
+	read_phdrs(fp);
 	read_shdrs(fp);
 	read_strtabs(fp);
 	read_symtabs(fp);
-	read_relocs(fp);
+	read_relocs(fp, use_real_mode);
 	if (ELF_BITS == 64)
 		percpu_init();
 	if (show_absolute_syms) {
@@ -1097,8 +1162,8 @@ void process(FILE *fp, int use_real_mode, int as_text,
 		return;
 	}
 	if (show_reloc_info) {
-		print_reloc_info();
+		print_reloc_info(kernexec);
 		return;
 	}
-	emit_relocs(as_text, use_real_mode);
+	emit_relocs(as_text, use_real_mode, kernexec);
 }

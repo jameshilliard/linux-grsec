@@ -2018,10 +2018,9 @@ static void __extract_sorted_bios(struct thin_c *tc)
 		bio = thin_bio(pbd);
 
 		bio_list_add(&tc->deferred_bio_list, bio);
-		rb_erase(&pbd->rb_node, &tc->sort_bio_list);
 	}
 
-	WARN_ON(!RB_EMPTY_ROOT(&tc->sort_bio_list));
+	tc->sort_bio_list = RB_ROOT;
 }
 
 static void __sort_thin_deferred_bios(struct thin_c *tc)
@@ -2838,7 +2837,7 @@ static struct pool *pool_create(struct mapped_device *pool_md,
 		return (struct pool *)pmd;
 	}
 
-	pool = kmalloc(sizeof(*pool), GFP_KERNEL);
+	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
 	if (!pool) {
 		*error = "Error allocating memory for pool";
 		err_p = ERR_PTR(-ENOMEM);

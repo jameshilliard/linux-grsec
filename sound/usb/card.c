@@ -429,7 +429,7 @@ static int snd_usb_audio_create(struct usb_interface *intf,
 
 	/* retrieve the vendor and device strings as longname */
 	if (quirk && quirk->vendor_name && *quirk->vendor_name) {
-		len = strlcpy(card->longname, quirk->vendor_name, sizeof(card->longname));
+		len = strlcpy_check(card->longname, quirk->vendor_name, sizeof(card->longname));
 	} else {
 		if (dev->descriptor.iManufacturer)
 			len = usb_string(dev, dev->descriptor.iManufacturer,

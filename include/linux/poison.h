@@ -19,18 +19,26 @@
  * under normal circumstances, used to verify that nobody uses
  * non-initialized list entries.
  */
-#define LIST_POISON1  ((void *) 0x100 + POISON_POINTER_DELTA)
-#define LIST_POISON2  ((void *) 0x200 + POISON_POINTER_DELTA)
+#define LIST_POISON1  ((void *) (long)0xFFFFFF02)
+#define LIST_POISON2  ((void *) (long)0xFFFFFF04)
 
 /********** include/linux/timer.h **********/
 /*
  * Magic number "tsta" to indicate a static timer initializer
  * for the object debugging code.
  */
-#define TIMER_ENTRY_STATIC	((void *) 0x74737461)
+#define TIMER_ENTRY_STATIC	((void *) 0x300 + POISON_POINTER_DELTA)
 
 /********** mm/debug-pagealloc.c **********/
 #define PAGE_POISON 0xaa
+
+/********** mm/sl[auo]b.c **********/
+#ifdef CONFIG_64BIT
+#define PAX_MEMORY_SANITIZE_VALUE	'\xfe'
+#else
+#define PAX_MEMORY_SANITIZE_VALUE	'\xff'
+#endif
+
 
 /********** mm/slab.c **********/
 /*

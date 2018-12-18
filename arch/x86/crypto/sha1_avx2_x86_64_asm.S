@@ -70,6 +70,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 #define	CTX	%rdi	/* arg1 */
 #define BUF	%rsi	/* arg2 */

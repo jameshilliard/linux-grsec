@@ -996,6 +996,7 @@ static struct dentry *splice_dentry(struct dentry *dn, struct inode *in,
 		       PTR_ERR(realdn), dn, in, ceph_vinop(in));
 		if (prehash)
 			*prehash = false; /* don't rehash on error */
+		dput(dn);
 		dn = realdn; /* note realdn contains the error */
 		goto out;
 	} else if (realdn) {

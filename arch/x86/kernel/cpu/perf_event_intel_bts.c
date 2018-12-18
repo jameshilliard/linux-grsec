@@ -272,7 +272,7 @@ static void bts_event_start(struct perf_event *event, int flags)
 	__bts_event_start(event);
 
 	/* PMI handler: this counter is running and likely generating PMIs */
-	ACCESS_ONCE(bts->started) = 1;
+	ACCESS_ONCE_RW(bts->started) = 1;
 }
 
 static void __bts_event_stop(struct perf_event *event)
@@ -286,7 +286,7 @@ static void __bts_event_stop(struct perf_event *event)
 	if (event->hw.state & PERF_HES_STOPPED)
 		return;
 
-	ACCESS_ONCE(event->hw.state) |= PERF_HES_STOPPED;
+	ACCESS_ONCE_RW(event->hw.state) |= PERF_HES_STOPPED;
 }
 
 static void bts_event_stop(struct perf_event *event, int flags)
@@ -294,7 +294,7 @@ static void bts_event_stop(struct perf_event *event, int flags)
 	struct bts_ctx *bts = this_cpu_ptr(&bts_ctx);
 
 	/* PMI handler: don't restart this counter */
-	ACCESS_ONCE(bts->started) = 0;
+	ACCESS_ONCE_RW(bts->started) = 0;
 
 	__bts_event_stop(event);
 
@@ -514,9 +514,6 @@ static int bts_event_init(struct perf_event *event)
 	if (event->attr.type != bts_pmu.type)
 		return -ENOENT;
 
-	if (x86_add_exclusive(x86_lbr_exclusive_bts))
-		return -EBUSY;
-
 	/*
 	 * BTS leaks kernel addresses even when CPL0 tracing is
 	 * disabled, so disallow intel_bts driver for unprivileged
@@ -529,6 +526,9 @@ static int bts_event_init(struct perf_event *event)
 	if (event->attr.exclude_kernel && perf_paranoid_kernel() &&
 	    !capable(CAP_SYS_ADMIN))
 		return -EACCES;
+
+	if (x86_add_exclusive(x86_lbr_exclusive_bts))
+		return -EBUSY;
 
 	ret = x86_reserve_hardware();
 	if (ret) {
@@ -548,6 +548,23 @@ static void bts_event_read(struct perf_event *event)
 static __init int bts_init(void)
 {
 	if (!boot_cpu_has(X86_FEATURE_DTES64) || !x86_pmu.bts)
+		return -ENODEV;
+
+	if (boot_cpu_has(X86_FEATURE_KAISER) || boot_cpu_has(X86_FEATURE_UDEREF))
+		/*
+		 * BTS hardware writes through a virtual memory map we must
+		 * either use the kernel physical map, or the user mapping of
+		 * the AUX buffer.
+		 *
+		 * However, since this driver supports per-CPU and per-task inherit
+		 * we cannot use the user mapping since it will not be availble
+		 * if we're not running the owning process.
+		 *
+		 * With PTI we can't use the kernal map either, because its not
+		 * there when we run userspace.
+		 *
+		 * For now, disable this driver when using PTI.
+		 */
 		return -ENODEV;
 
 	bts_pmu.capabilities	= PERF_PMU_CAP_AUX_NO_SG | PERF_PMU_CAP_ITRACE;

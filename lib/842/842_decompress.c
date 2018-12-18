@@ -259,7 +259,7 @@ static int do_op(struct sw842_param *p, u8 o)
 	}
 
 	if (sw842_template_counts)
-		atomic_inc(&template_count[o]);
+		atomic_inc_unchecked(&template_count[o]);
 
 	return 0;
 }
@@ -327,7 +327,7 @@ int sw842_decompress(const u8 *in, unsigned int ilen,
 			}
 
 			if (sw842_template_counts)
-				atomic_inc(&template_repeat_count);
+				atomic_inc_unchecked(&template_repeat_count);
 
 			break;
 		case OP_ZEROS:
@@ -339,7 +339,7 @@ int sw842_decompress(const u8 *in, unsigned int ilen,
 			p.olen -= 8;
 
 			if (sw842_template_counts)
-				atomic_inc(&template_zeros_count);
+				atomic_inc_unchecked(&template_zeros_count);
 
 			break;
 		case OP_SHORT_DATA:
@@ -360,12 +360,12 @@ int sw842_decompress(const u8 *in, unsigned int ilen,
 			}
 
 			if (sw842_template_counts)
-				atomic_inc(&template_short_data_count);
+				atomic_inc_unchecked(&template_short_data_count);
 
 			break;
 		case OP_END:
 			if (sw842_template_counts)
-				atomic_inc(&template_end_count);
+				atomic_inc_unchecked(&template_end_count);
 
 			break;
 		default: /* use template */

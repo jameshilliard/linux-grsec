@@ -138,6 +138,9 @@ static int __oprofilefs_create_file(struct dentry *root, char const *name,
 	struct dentry *dentry;
 	struct inode *inode;
 
+	if (!root)
+		return -ENOMEM;
+
 	mutex_lock(&d_inode(root)->i_mutex);
 	dentry = d_alloc_name(root, name);
 	if (!dentry) {
@@ -189,7 +192,7 @@ static const struct file_operations atomic_ro_fops = {
 
 
 int oprofilefs_create_ro_atomic(struct dentry *root,
-	char const *name, atomic_t *val)
+	char const *name, atomic_unchecked_t *val)
 {
 	return __oprofilefs_create_file(root, name,
 					&atomic_ro_fops, 0444, val);

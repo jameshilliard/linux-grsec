@@ -7,6 +7,7 @@
  */
 #include <linux/linkage.h>
 #include <asm/percpu.h>
+#include <asm/nospec-branch.h>
 
 .text
 
@@ -43,11 +44,13 @@ ENTRY(this_cpu_cmpxchg16b_emu)
 
 	popfq
 	mov $1, %al
+	pax_force_retaddr
 	ret
 
 .Lnot_same:
 	popfq
 	xor %al,%al
+	pax_force_retaddr
 	ret
 
 ENDPROC(this_cpu_cmpxchg16b_emu)

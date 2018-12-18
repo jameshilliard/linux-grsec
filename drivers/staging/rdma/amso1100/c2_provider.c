@@ -700,7 +700,7 @@ static int c2_pseudo_down(struct net_device *netdev)
 	return 0;
 }
 
-static int c2_pseudo_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t c2_pseudo_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
 	kfree_skb(skb);
 	return NETDEV_TX_OK;

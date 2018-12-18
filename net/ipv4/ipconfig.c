@@ -341,7 +341,7 @@ static int __init ic_devinet_ioctl(unsigned int cmd, struct ifreq *arg)
 
 	mm_segment_t oldfs = get_fs();
 	set_fs(get_ds());
-	res = devinet_ioctl(&init_net, cmd, (struct ifreq __user *) arg);
+	res = devinet_ioctl(&init_net, cmd, (struct ifreq __force_user *) arg);
 	set_fs(oldfs);
 	return res;
 }
@@ -352,7 +352,7 @@ static int __init ic_dev_ioctl(unsigned int cmd, struct ifreq *arg)
 
 	mm_segment_t oldfs = get_fs();
 	set_fs(get_ds());
-	res = dev_ioctl(&init_net, cmd, (struct ifreq __user *) arg);
+	res = dev_ioctl(&init_net, cmd, (struct ifreq __force_user *) arg);
 	set_fs(oldfs);
 	return res;
 }
@@ -363,7 +363,7 @@ static int __init ic_route_ioctl(unsigned int cmd, struct rtentry *arg)
 
 	mm_segment_t oldfs = get_fs();
 	set_fs(get_ds());
-	res = ip_rt_ioctl(&init_net, cmd, (void __user *) arg);
+	res = ip_rt_ioctl(&init_net, cmd, (void __force_user *) arg);
 	set_fs(oldfs);
 	return res;
 }
@@ -1730,7 +1730,7 @@ __setup("nfsaddrs=", nfsaddrs_config_setup);
 
 static int __init vendor_class_identifier_setup(char *addrs)
 {
-	if (strlcpy(vendor_class_identifier, addrs,
+	if (strlcpy_check(vendor_class_identifier, addrs,
 		    sizeof(vendor_class_identifier))
 	    >= sizeof(vendor_class_identifier))
 		pr_warn("DHCP: vendorclass too long, truncated to \"%s\"",

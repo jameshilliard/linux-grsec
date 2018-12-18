@@ -162,6 +162,7 @@ int ipv6_sock_mc_join(struct sock *sk, int ifindex,
 		      const struct in6_addr *addr);
 int ipv6_sock_mc_drop(struct sock *sk, int ifindex,
 		      const struct in6_addr *addr);
+void __ipv6_sock_mc_close(struct sock *sk);
 void ipv6_sock_mc_close(struct sock *sk);
 bool inet6_mc_check(struct sock *sk, const struct in6_addr *mc_addr,
 		    const struct in6_addr *src_addr);
@@ -299,6 +300,16 @@ static inline void in6_dev_put(struct inet6_dev *idev)
 {
 	if (atomic_dec_and_test(&idev->refcnt))
 		in6_dev_finish_destroy(idev);
+}
+
+static inline void in6_dev_put_clear(struct inet6_dev **pidev)
+{
+	struct inet6_dev *idev = *pidev;
+
+	if (idev) {
+		in6_dev_put(idev);
+		*pidev = NULL;
+	}
 }
 
 static inline void __in6_dev_put(struct inet6_dev *idev)

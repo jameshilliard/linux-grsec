@@ -89,7 +89,7 @@ struct timer_list can_stattimer;   /* timer for statistics update */
 struct s_stats    can_stats;       /* packet statistics */
 struct s_pstats   can_pstats;      /* receive list statistics */
 
-static atomic_t skbcounter = ATOMIC_INIT(0);
+static atomic_unchecked_t skbcounter = ATOMIC_INIT(0);
 
 /*
  * af_can socket functions
@@ -691,7 +691,7 @@ static void can_receive(struct sk_buff *skb, struct net_device *dev)
 
 	/* create non-zero unique skb identifier together with *skb */
 	while (!(can_skb_prv(skb)->skbcnt))
-		can_skb_prv(skb)->skbcnt = atomic_inc_return(&skbcounter);
+		can_skb_prv(skb)->skbcnt = atomic_inc_return_unchecked(&skbcounter);
 
 	rcu_read_lock();
 
@@ -896,7 +896,7 @@ static const struct net_proto_family can_family_ops = {
 };
 
 /* notifier block for netdevice event */
-static struct notifier_block can_netdev_notifier __read_mostly = {
+static struct notifier_block can_netdev_notifier = {
 	.notifier_call = can_notifier,
 };
 

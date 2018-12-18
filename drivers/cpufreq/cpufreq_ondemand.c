@@ -509,7 +509,7 @@ static void od_exit(struct dbs_data *dbs_data, bool notify)
 
 define_get_cpu_dbs_routines(od_cpu_dbs_info);
 
-static struct od_ops od_ops = {
+static struct od_ops od_ops __read_only = {
 	.powersave_bias_init_cpu = ondemand_powersave_bias_init_cpu,
 	.powersave_bias_target = generic_powersave_bias_target,
 	.freq_increase = dbs_freq_increase,
@@ -568,14 +568,18 @@ void od_register_powersave_bias_handler(unsigned int (*f)
 		(struct cpufreq_policy *, unsigned int, unsigned int),
 		unsigned int powersave_bias)
 {
-	od_ops.powersave_bias_target = f;
+	pax_open_kernel();
+	const_cast(od_ops.powersave_bias_target) = f;
+	pax_close_kernel();
 	od_set_powersave_bias(powersave_bias);
 }
 EXPORT_SYMBOL_GPL(od_register_powersave_bias_handler);
 
 void od_unregister_powersave_bias_handler(void)
 {
-	od_ops.powersave_bias_target = generic_powersave_bias_target;
+	pax_open_kernel();
+	const_cast(od_ops.powersave_bias_target) = generic_powersave_bias_target;
+	pax_close_kernel();
 	od_set_powersave_bias(0);
 }
 EXPORT_SYMBOL_GPL(od_unregister_powersave_bias_handler);

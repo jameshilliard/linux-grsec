@@ -796,7 +796,7 @@ static void memcg_check_events(struct mem_cgroup *memcg, struct page *page)
 			mem_cgroup_update_tree(memcg, page);
 #if MAX_NUMNODES > 1
 		if (unlikely(do_numainfo))
-			atomic_inc(&memcg->numainfo_events);
+			atomic64_inc(&memcg->numainfo_events);
 #endif
 	}
 }
@@ -1438,7 +1438,7 @@ static void mem_cgroup_may_update_nodemask(struct mem_cgroup *memcg)
 	 * numainfo_events > 0 means there was at least NUMAINFO_EVENTS_TARGET
 	 * pagein/pageout changes since the last update.
 	 */
-	if (!atomic_read(&memcg->numainfo_events))
+	if (!atomic64_read(&memcg->numainfo_events))
 		return;
 	if (atomic_inc_return(&memcg->numainfo_updating) > 1)
 		return;
@@ -1452,7 +1452,7 @@ static void mem_cgroup_may_update_nodemask(struct mem_cgroup *memcg)
 			node_clear(nid, memcg->scan_nodes);
 	}
 
-	atomic_set(&memcg->numainfo_events, 0);
+	atomic64_set(&memcg->numainfo_events, 0);
 	atomic_set(&memcg->numainfo_updating, 0);
 }
 
@@ -2308,7 +2308,7 @@ static void __memcg_schedule_kmem_cache_create(struct mem_cgroup *memcg,
 {
 	struct memcg_kmem_cache_create_work *cw;
 
-	cw = kmalloc(sizeof(*cw), GFP_NOWAIT);
+	cw = kmalloc(sizeof(*cw), GFP_NOWAIT | __GFP_NOWARN);
 	if (!cw)
 		return;
 

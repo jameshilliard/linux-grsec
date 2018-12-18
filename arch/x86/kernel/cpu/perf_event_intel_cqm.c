@@ -1383,7 +1383,9 @@ static int __init intel_cqm_init(void)
 		goto out;
 	}
 
-	event_attr_intel_cqm_llc_scale.event_str = str;
+	pax_open_kernel();
+	const_cast(event_attr_intel_cqm_llc_scale.event_str) = str;
+	pax_close_kernel();
 
 	ret = intel_cqm_setup_rmid_cache();
 	if (ret)

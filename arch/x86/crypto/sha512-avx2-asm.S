@@ -51,6 +51,7 @@
 
 #ifdef CONFIG_AS_AVX2
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .text
 
@@ -568,7 +569,8 @@ frame_size = frame_GPRSAVE + GPRSAVE_SIZE
 #   message blocks.
 # L is the message length in SHA512 blocks
 ########################################################################
-ENTRY(sha512_transform_rorx)
+ALIGN
+RAP_ENTRY(sha512_transform_rorx)
 	# Allocate Stack Space
 	mov	%rsp, %rax
 	sub	$frame_size, %rsp
@@ -678,6 +680,7 @@ done_hash:
 
 	# Restore Stack Pointer
 	mov	frame_RSPSAVE(%rsp), %rsp
+	pax_force_retaddr
 	ret
 ENDPROC(sha512_transform_rorx)
 

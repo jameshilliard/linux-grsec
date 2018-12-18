@@ -1118,9 +1118,9 @@ static ssize_t fimc_md_sysfs_show(struct device *dev,
 	struct fimc_md *fmd = platform_get_drvdata(pdev);
 
 	if (fmd->user_subdev_api)
-		return strlcpy(buf, "Sub-device API (sub-dev)\n", PAGE_SIZE);
+		return strlcpy_check(buf, "Sub-device API (sub-dev)\n", PAGE_SIZE);
 
-	return strlcpy(buf, "V4L2 video node only API (vid-dev)\n", PAGE_SIZE);
+	return strlcpy_check(buf, "V4L2 video node only API (vid-dev)\n", PAGE_SIZE);
 }
 
 static ssize_t fimc_md_sysfs_store(struct device *dev,

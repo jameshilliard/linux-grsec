@@ -79,7 +79,7 @@ union bios32 {
 static struct {
 	unsigned long address;
 	unsigned short segment;
-} bios32_indirect __initdata = { 0, __KERNEL_CS };
+} bios32_indirect __initdata = { 0, __PCIBIOS_CS };
 
 /*
  * Returns the entry point for the given service, NULL on error
@@ -92,37 +92,80 @@ static unsigned long __init bios32_service(unsigned long service)
 	unsigned long length;		/* %ecx */
 	unsigned long entry;		/* %edx */
 	unsigned long flags;
+	struct desc_struct d, *gdt;
 
 	local_irq_save(flags);
-	__asm__("lcall *(%%edi); cld"
+
+	gdt = get_cpu_gdt_table(smp_processor_id());
+
+	pack_descriptor(&d, 0UL, 0xFFFFFUL, 0x9B, 0xC);
+	write_gdt_entry(gdt, GDT_ENTRY_PCIBIOS_CS, &d, DESCTYPE_S);
+	pack_descriptor(&d, 0UL, 0xFFFFFUL, 0x93, 0xC);
+	write_gdt_entry(gdt, GDT_ENTRY_PCIBIOS_DS, &d, DESCTYPE_S);
+
+	__asm__("movw %w7, %%ds; lcall *(%%edi); push %%ss; pop %%ds; cld"
 		: "=a" (return_code),
 		  "=b" (address),
 		  "=c" (length),
 		  "=d" (entry)
 		: "0" (service),
 		  "1" (0),
-		  "D" (&bios32_indirect));
+		  "D" (&bios32_indirect),
+		  "r"(__PCIBIOS_DS)
+		: "memory");
+
+	pax_open_kernel();
+	gdt[GDT_ENTRY_PCIBIOS_CS].a = 0;
+	gdt[GDT_ENTRY_PCIBIOS_CS].b = 0;
+	gdt[GDT_ENTRY_PCIBIOS_DS].a = 0;
+	gdt[GDT_ENTRY_PCIBIOS_DS].b = 0;
+	pax_close_kernel();
+
 	local_irq_restore(flags);
 
 	switch (return_code) {
-		case 0:
-			return address + entry;
-		case 0x80:	/* Not present */
-			printk(KERN_WARNING "bios32_service(0x%lx): not present\n", service);
+	case 0: {
+		int cpu;
+		unsigned char flags;
+
+		printk(KERN_INFO "bios32_service: base:%08lx length:%08lx entry:%08lx\n", address, length, entry);
+		if (address >= 0xFFFF0 || length > 0x100000 - address || length <= entry) {
+			printk(KERN_WARNING "bios32_service: not valid\n");
 			return 0;
-		default: /* Shouldn't happen */
-			printk(KERN_WARNING "bios32_service(0x%lx): returned 0x%x -- BIOS bug!\n",
-				service, return_code);
-			return 0;
+		}
+		address = address + PAGE_OFFSET;
+		length += 16UL; /* some BIOSs underreport this... */
+		flags = 4;
+		if (length >= 64*1024*1024) {
+			length >>= PAGE_SHIFT;
+			flags |= 8;
+		}
+
+		for (cpu = 0; cpu < nr_cpu_ids; cpu++) {
+			gdt = get_cpu_gdt_table(cpu);
+			pack_descriptor(&d, address, length, 0x9b, flags);
+			write_gdt_entry(gdt, GDT_ENTRY_PCIBIOS_CS, &d, DESCTYPE_S);
+			pack_descriptor(&d, address, length, 0x93, flags);
+			write_gdt_entry(gdt, GDT_ENTRY_PCIBIOS_DS, &d, DESCTYPE_S);
+		}
+		return entry;
+	}
+	case 0x80:	/* Not present */
+		printk(KERN_WARNING "bios32_service(0x%lx): not present\n", service);
+		return 0;
+	default: /* Shouldn't happen */
+		printk(KERN_WARNING "bios32_service(0x%lx): returned 0x%x -- BIOS bug!\n",
+			service, return_code);
+		return 0;
 	}
 }
 
 static struct {
 	unsigned long address;
 	unsigned short segment;
-} pci_indirect = { 0, __KERNEL_CS };
+} pci_indirect __read_only = { 0, __PCIBIOS_CS };
 
-static int pci_bios_present;
+static int pci_bios_present __read_only;
 
 static int __init check_pcibios(void)
 {
@@ -131,11 +174,13 @@ static int __init check_pcibios(void)
 	unsigned long flags, pcibios_entry;
 
 	if ((pcibios_entry = bios32_service(PCI_SERVICE))) {
-		pci_indirect.address = pcibios_entry + PAGE_OFFSET;
+		pci_indirect.address = pcibios_entry;
 
 		local_irq_save(flags);
-		__asm__(
-			"lcall *(%%edi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%edi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -144,7 +189,8 @@ static int __init check_pcibios(void)
 			  "=b" (ebx),
 			  "=c" (ecx)
 			: "1" (PCIBIOS_PCI_BIOS_PRESENT),
-			  "D" (&pci_indirect)
+			  "D" (&pci_indirect),
+			  "r" (__PCIBIOS_DS)
 			: "memory");
 		local_irq_restore(flags);
 
@@ -189,7 +235,10 @@ static int pci_bios_read(unsigned int seg, unsigned int bus,
 
 	switch (len) {
 	case 1:
-		__asm__("lcall *(%%esi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%esi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -198,7 +247,8 @@ static int pci_bios_read(unsigned int seg, unsigned int bus,
 			: "1" (PCIBIOS_READ_CONFIG_BYTE),
 			  "b" (bx),
 			  "D" ((long)reg),
-			  "S" (&pci_indirect));
+			  "S" (&pci_indirect),
+			  "r" (__PCIBIOS_DS));
 		/*
 		 * Zero-extend the result beyond 8 bits, do not trust the
 		 * BIOS having done it:
@@ -206,7 +256,10 @@ static int pci_bios_read(unsigned int seg, unsigned int bus,
 		*value &= 0xff;
 		break;
 	case 2:
-		__asm__("lcall *(%%esi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%esi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -215,7 +268,8 @@ static int pci_bios_read(unsigned int seg, unsigned int bus,
 			: "1" (PCIBIOS_READ_CONFIG_WORD),
 			  "b" (bx),
 			  "D" ((long)reg),
-			  "S" (&pci_indirect));
+			  "S" (&pci_indirect),
+			  "r" (__PCIBIOS_DS));
 		/*
 		 * Zero-extend the result beyond 16 bits, do not trust the
 		 * BIOS having done it:
@@ -223,7 +277,10 @@ static int pci_bios_read(unsigned int seg, unsigned int bus,
 		*value &= 0xffff;
 		break;
 	case 4:
-		__asm__("lcall *(%%esi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%esi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -232,7 +289,8 @@ static int pci_bios_read(unsigned int seg, unsigned int bus,
 			: "1" (PCIBIOS_READ_CONFIG_DWORD),
 			  "b" (bx),
 			  "D" ((long)reg),
-			  "S" (&pci_indirect));
+			  "S" (&pci_indirect),
+			  "r" (__PCIBIOS_DS));
 		break;
 	}
 
@@ -256,7 +314,10 @@ static int pci_bios_write(unsigned int seg, unsigned int bus,
 
 	switch (len) {
 	case 1:
-		__asm__("lcall *(%%esi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%esi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -265,10 +326,14 @@ static int pci_bios_write(unsigned int seg, unsigned int bus,
 			  "c" (value),
 			  "b" (bx),
 			  "D" ((long)reg),
-			  "S" (&pci_indirect));
+			  "S" (&pci_indirect),
+			  "r" (__PCIBIOS_DS));
 		break;
 	case 2:
-		__asm__("lcall *(%%esi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%esi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -277,10 +342,14 @@ static int pci_bios_write(unsigned int seg, unsigned int bus,
 			  "c" (value),
 			  "b" (bx),
 			  "D" ((long)reg),
-			  "S" (&pci_indirect));
+			  "S" (&pci_indirect),
+			  "r" (__PCIBIOS_DS));
 		break;
 	case 4:
-		__asm__("lcall *(%%esi); cld\n\t"
+		__asm__("movw %w6, %%ds\n\t"
+			"lcall *%%ss:(%%esi); cld\n\t"
+			"push %%ss\n\t"
+			"pop %%ds\n\t"
 			"jc 1f\n\t"
 			"xor %%ah, %%ah\n"
 			"1:"
@@ -289,7 +358,8 @@ static int pci_bios_write(unsigned int seg, unsigned int bus,
 			  "c" (value),
 			  "b" (bx),
 			  "D" ((long)reg),
-			  "S" (&pci_indirect));
+			  "S" (&pci_indirect),
+			  "r" (__PCIBIOS_DS));
 		break;
 	}
 
@@ -394,10 +464,13 @@ struct irq_routing_table * pcibios_get_irq_routing_table(void)
 
 	DBG("PCI: Fetching IRQ routing table... ");
 	__asm__("push %%es\n\t"
+		"movw %w8, %%ds\n\t"
 		"push %%ds\n\t"
 		"pop  %%es\n\t"
-		"lcall *(%%esi); cld\n\t"
+		"lcall *%%ss:(%%esi); cld\n\t"
 		"pop %%es\n\t"
+		"push %%ss\n\t"
+		"pop %%ds\n"
 		"jc 1f\n\t"
 		"xor %%ah, %%ah\n"
 		"1:"
@@ -408,7 +481,8 @@ struct irq_routing_table * pcibios_get_irq_routing_table(void)
 		  "1" (0),
 		  "D" ((long) &opt),
 		  "S" (&pci_indirect),
-		  "m" (opt)
+		  "m" (opt),
+		  "r" (__PCIBIOS_DS)
 		: "memory");
 	DBG("OK  ret=%d, size=%d, map=%x\n", ret, opt.size, map);
 	if (ret & 0xff00)
@@ -432,7 +506,10 @@ int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq)
 {
 	int ret;
 
-	__asm__("lcall *(%%esi); cld\n\t"
+	__asm__("movw %w5, %%ds\n\t"
+		"lcall *%%ss:(%%esi); cld\n\t"
+		"push %%ss\n\t"
+		"pop %%ds\n"
 		"jc 1f\n\t"
 		"xor %%ah, %%ah\n"
 		"1:"
@@ -440,7 +517,8 @@ int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq)
 		: "0" (PCIBIOS_SET_PCI_HW_INT),
 		  "b" ((dev->bus->number << 8) | dev->devfn),
 		  "c" ((irq << 8) | (pin + 10)),
-		  "S" (&pci_indirect));
+		  "S" (&pci_indirect),
+		  "r" (__PCIBIOS_DS));
 	return !(ret & 0xff00);
 }
 EXPORT_SYMBOL(pcibios_set_irq_routing);

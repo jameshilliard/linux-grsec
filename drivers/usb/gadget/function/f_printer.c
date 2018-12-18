@@ -1164,7 +1164,8 @@ static ssize_t f_printer_opts_pnp_string_show(struct config_item *item,
 	int result;
 
 	mutex_lock(&opts->lock);
-	result = strlcpy(page, opts->pnp_string + 2, PNP_STRING_LEN - 2);
+	strlcpy(page, opts->pnp_string + 2, PNP_STRING_LEN - 2);
+	result = strlen(page);
 	mutex_unlock(&opts->lock);
 
 	return result;
@@ -1177,10 +1178,12 @@ static ssize_t f_printer_opts_pnp_string_store(struct config_item *item,
 	int result, l;
 
 	mutex_lock(&opts->lock);
-	result = strlcpy(opts->pnp_string + 2, page, PNP_STRING_LEN - 2);
-	l = strlen(opts->pnp_string + 2) + 2;
+	strlcpy(opts->pnp_string + 2, page, PNP_STRING_LEN - 2);
+	result = strlen(opts->pnp_string + 2);
+	l = result + 2;
 	opts->pnp_string[0] = (l >> 8) & 0xFF;
 	opts->pnp_string[1] = l & 0xFF;
+
 	mutex_unlock(&opts->lock);
 
 	return result;

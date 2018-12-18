@@ -90,12 +90,17 @@ LIST_HEAD(vm_list);
 
 static cpumask_var_t cpus_hardware_enabled;
 static int kvm_usage_count;
-static atomic_t hardware_enable_failed;
+static atomic_unchecked_t hardware_enable_failed;
 
 struct kmem_cache *kvm_vcpu_cache;
 EXPORT_SYMBOL_GPL(kvm_vcpu_cache);
 
-static __read_mostly struct preempt_ops kvm_preempt_ops;
+static void kvm_sched_in(struct preempt_notifier *pn, int cpu);
+static void kvm_sched_out(struct preempt_notifier *pn, struct task_struct *next);
+static struct preempt_ops kvm_preempt_ops = {
+	.sched_in = kvm_sched_in,
+	.sched_out = kvm_sched_out,
+};
 
 struct dentry *kvm_debugfs_dir;
 EXPORT_SYMBOL_GPL(kvm_debugfs_dir);
@@ -848,7 +853,7 @@ int __kvm_set_memory_region(struct kvm *kvm,
 	/* We can read the guest memory with __xxx_user() later on. */
 	if ((id < KVM_USER_MEM_SLOTS) &&
 	    ((mem->userspace_addr & (PAGE_SIZE - 1)) ||
-	     !access_ok(VERIFY_WRITE,
+	     !access_ok_noprefault(VERIFY_WRITE,
 			(void __user *)(unsigned long)mem->userspace_addr,
 			mem->memory_size)))
 		goto out;
@@ -1902,9 +1907,17 @@ EXPORT_SYMBOL_GPL(kvm_read_guest_cached);
 
 int kvm_clear_guest_page(struct kvm *kvm, gfn_t gfn, int offset, int len)
 {
-	const void *zero_page = (const void *) __va(page_to_phys(ZERO_PAGE(0)));
+	int r;
+	unsigned long addr;
 
-	return kvm_write_guest_page(kvm, gfn, zero_page, offset, len);
+	addr = gfn_to_hva(kvm, gfn);
+	if (kvm_is_error_hva(addr))
+		return -EFAULT;
+	r = __clear_user((void __user *)addr + offset, len);
+	if (r)
+		return -EFAULT;
+	mark_page_dirty(kvm, gfn);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(kvm_clear_guest_page);
 
@@ -2241,7 +2254,7 @@ static int kvm_vcpu_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static struct file_operations kvm_vcpu_fops = {
+static file_operations_no_const kvm_vcpu_fops __read_only = {
 	.release        = kvm_vcpu_release,
 	.unlocked_ioctl = kvm_vcpu_ioctl,
 #ifdef CONFIG_KVM_COMPAT
@@ -2859,7 +2872,7 @@ static long kvm_vm_ioctl(struct file *filp,
 	case KVM_SET_GSI_ROUTING: {
 		struct kvm_irq_routing routing;
 		struct kvm_irq_routing __user *urouting;
-		struct kvm_irq_routing_entry *entries;
+		struct kvm_irq_routing_entry *entries = NULL;
 
 		r = -EFAULT;
 		if (copy_from_user(&routing, argp, sizeof(routing)))
@@ -2869,15 +2882,17 @@ static long kvm_vm_ioctl(struct file *filp,
 			goto out;
 		if (routing.flags)
 			goto out;
-		r = -ENOMEM;
-		entries = vmalloc(routing.nr * sizeof(*entries));
-		if (!entries)
-			goto out;
-		r = -EFAULT;
-		urouting = argp;
-		if (copy_from_user(entries, urouting->entries,
-				   routing.nr * sizeof(*entries)))
-			goto out_free_irq_routing;
+		if (routing.nr) {
+			r = -ENOMEM;
+			entries = vmalloc(routing.nr * sizeof(*entries));
+			if (!entries)
+				goto out;
+			r = -EFAULT;
+			urouting = argp;
+			if (copy_from_user(entries, urouting->entries,
+					   routing.nr * sizeof(*entries)))
+				goto out_free_irq_routing;
+		}
 		r = kvm_set_irq_routing(kvm, entries, routing.nr,
 					routing.flags);
 out_free_irq_routing:
@@ -2957,7 +2972,7 @@ out:
 }
 #endif
 
-static struct file_operations kvm_vm_fops = {
+static file_operations_no_const kvm_vm_fops __read_only = {
 	.release        = kvm_vm_release,
 	.unlocked_ioctl = kvm_vm_ioctl,
 #ifdef CONFIG_KVM_COMPAT
@@ -3028,7 +3043,7 @@ out:
 	return r;
 }
 
-static struct file_operations kvm_chardev_ops = {
+static file_operations_no_const kvm_chardev_ops __read_only = {
 	.unlocked_ioctl = kvm_dev_ioctl,
 	.compat_ioctl   = kvm_dev_ioctl,
 	.llseek		= noop_llseek,
@@ -3054,7 +3069,7 @@ static void hardware_enable_nolock(void *junk)
 
 	if (r) {
 		cpumask_clear_cpu(cpu, cpus_hardware_enabled);
-		atomic_inc(&hardware_enable_failed);
+		atomic_inc_unchecked(&hardware_enable_failed);
 		pr_info("kvm: enabling virtualization on CPU%d failed\n", cpu);
 	}
 }
@@ -3109,10 +3124,10 @@ static int hardware_enable_all(void)
 
 	kvm_usage_count++;
 	if (kvm_usage_count == 1) {
-		atomic_set(&hardware_enable_failed, 0);
+		atomic_set_unchecked(&hardware_enable_failed, 0);
 		on_each_cpu(hardware_enable_nolock, NULL, 1);
 
-		if (atomic_read(&hardware_enable_failed)) {
+		if (atomic_read_unchecked(&hardware_enable_failed)) {
 			hardware_disable_all_nolock();
 			r = -EBUSY;
 		}
@@ -3588,8 +3603,9 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 	/* A kmem cache lets us meet the alignment requirements of fx_save. */
 	if (!vcpu_align)
 		vcpu_align = __alignof__(struct kvm_vcpu);
-	kvm_vcpu_cache = kmem_cache_create("kvm_vcpu", vcpu_size, vcpu_align,
-					   0, NULL);
+	kvm_vcpu_cache = kmem_cache_create_usercopy("kvm_vcpu", vcpu_size, vcpu_align,
+					   0, offsetof(struct kvm_vcpu, arch),
+					   sizeof(((struct kvm_vcpu *)0)->arch), NULL);
 	if (!kvm_vcpu_cache) {
 		r = -ENOMEM;
 		goto out_free_3;
@@ -3599,9 +3615,11 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 	if (r)
 		goto out_free;
 
+	pax_open_kernel();
 	kvm_chardev_ops.owner = module;
 	kvm_vm_fops.owner = module;
 	kvm_vcpu_fops.owner = module;
+	pax_close_kernel();
 
 	r = misc_register(&kvm_dev);
 	if (r) {
@@ -3610,9 +3628,6 @@ int kvm_init(void *opaque, unsigned vcpu_size, unsigned vcpu_align,
 	}
 
 	register_syscore_ops(&kvm_syscore_ops);
-
-	kvm_preempt_ops.sched_in = kvm_sched_in;
-	kvm_preempt_ops.sched_out = kvm_sched_out;
 
 	r = kvm_init_debug();
 	if (r) {

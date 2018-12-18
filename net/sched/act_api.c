@@ -130,6 +130,7 @@ nla_put_failure:
 
 static int tcf_del_walker(struct sk_buff *skb, struct tc_action *a)
 {
+	const struct tc_action_ops *ops = a->ops;
 	struct tcf_hashinfo *hinfo = a->ops->hinfo;
 	struct hlist_head *head;
 	struct hlist_node *n;
@@ -149,7 +150,7 @@ static int tcf_del_walker(struct sk_buff *skb, struct tc_action *a)
 			a->priv = p;
 			ret = __tcf_hash_release(a, false, true);
 			if (ret == ACT_P_DELETED) {
-				module_put(a->ops->owner);
+				module_put(ops->owner);
 				n_i++;
 			} else if (ret < 0)
 				goto nla_put_failure;
@@ -430,13 +431,15 @@ EXPORT_SYMBOL(tcf_action_exec);
 
 int tcf_action_destroy(struct list_head *actions, int bind)
 {
+	const struct tc_action_ops *ops;
 	struct tc_action *a, *tmp;
 	int ret = 0;
 
 	list_for_each_entry_safe(a, tmp, actions, list) {
+		ops = a->ops;
 		ret = __tcf_hash_release(a, bind, true);
 		if (ret == ACT_P_DELETED)
-			module_put(a->ops->owner);
+			module_put(ops->owner);
 		else if (ret < 0)
 			return ret;
 		list_del(&a->list);
@@ -526,7 +529,7 @@ struct tc_action *tcf_action_init_1(struct net *net, struct nlattr *nla,
 			goto err_out;
 	} else {
 		err = -EINVAL;
-		if (strlcpy(act_name, name, IFNAMSIZ) >= IFNAMSIZ)
+		if (strlcpy_check(act_name, name, IFNAMSIZ) >= IFNAMSIZ)
 			goto err_out;
 	}
 

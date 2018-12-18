@@ -37,8 +37,8 @@ int btrfs_dev_replace_is_ongoing(struct btrfs_dev_replace *dev_replace);
 void btrfs_dev_replace_lock(struct btrfs_dev_replace *dev_replace);
 void btrfs_dev_replace_unlock(struct btrfs_dev_replace *dev_replace);
 
-static inline void btrfs_dev_replace_stats_inc(atomic64_t *stat_value)
+static inline void btrfs_dev_replace_stats_inc(atomic64_unchecked_t *stat_value)
 {
-	atomic64_inc(stat_value);
+	atomic64_inc_unchecked(stat_value);
 }
 #endif

@@ -267,8 +267,8 @@ sfw_init_session(sfw_session_t *sn, lst_sid_t sid,
 	INIT_LIST_HEAD(&sn->sn_list);
 	INIT_LIST_HEAD(&sn->sn_batches);
 	atomic_set(&sn->sn_refcount, 1);	/* +1 for caller */
-	atomic_set(&sn->sn_brw_errors, 0);
-	atomic_set(&sn->sn_ping_errors, 0);
+	atomic_set_unchecked(&sn->sn_brw_errors, 0);
+	atomic_set_unchecked(&sn->sn_ping_errors, 0);
 	strlcpy(&sn->sn_name[0], name, sizeof(sn->sn_name));
 
 	sn->sn_timer_active = 0;
@@ -389,8 +389,8 @@ sfw_get_stats(srpc_stat_reqst_t *request, srpc_stat_reply_t *reply)
 	/* send over the msecs since the session was started
 	 - with 32 bits to send, this is ~49 days */
 	cnt->running_ms	     = jiffies_to_msecs(jiffies - sn->sn_started);
-	cnt->brw_errors      = atomic_read(&sn->sn_brw_errors);
-	cnt->ping_errors     = atomic_read(&sn->sn_ping_errors);
+	cnt->brw_errors      = atomic_read_unchecked(&sn->sn_brw_errors);
+	cnt->ping_errors     = atomic_read_unchecked(&sn->sn_ping_errors);
 	cnt->zombie_sessions = atomic_read(&sfw_data.fw_nzombies);
 
 	cnt->active_batches = 0;
@@ -429,7 +429,7 @@ sfw_make_session(srpc_mksn_reqst_t *request, srpc_mksn_reply_t *reply)
 
 		if (!request->mksn_force) {
 			reply->mksn_status = EBUSY;
-			cplen = strlcpy(&reply->mksn_name[0], &sn->sn_name[0],
+			cplen = strlcpy_check(&reply->mksn_name[0], &sn->sn_name[0],
 					sizeof(reply->mksn_name));
 			if (cplen >= sizeof(reply->mksn_name))
 				return -E2BIG;
@@ -518,7 +518,7 @@ sfw_debug_session(srpc_debug_reqst_t *request, srpc_debug_reply_t *reply)
 	reply->dbg_status  = 0;
 	reply->dbg_sid     = sn->sn_id;
 	reply->dbg_timeout = sn->sn_timeout;
-	if (strlcpy(reply->dbg_name, &sn->sn_name[0], sizeof(reply->dbg_name))
+	if (strlcpy_check(reply->dbg_name, &sn->sn_name[0], sizeof(reply->dbg_name))
 	    >= sizeof(reply->dbg_name))
 		return -E2BIG;
 
@@ -1624,12 +1624,10 @@ static srpc_service_t sfw_services[] = {
 
 extern sfw_test_client_ops_t ping_test_client;
 extern srpc_service_t	ping_test_service;
-extern void ping_init_test_client(void);
 extern void ping_init_test_service(void);
 
 extern sfw_test_client_ops_t brw_test_client;
 extern srpc_service_t	brw_test_service;
-extern void brw_init_test_client(void);
 extern void brw_init_test_service(void);
 
 int
@@ -1669,12 +1667,10 @@ sfw_startup(void)
 	INIT_LIST_HEAD(&sfw_data.fw_zombie_rpcs);
 	INIT_LIST_HEAD(&sfw_data.fw_zombie_sessions);
 
-	brw_init_test_client();
 	brw_init_test_service();
 	rc = sfw_register_test(&brw_test_service, &brw_test_client);
 	LASSERT(rc == 0);
 
-	ping_init_test_client();
 	ping_init_test_service();
 	rc = sfw_register_test(&ping_test_service, &ping_test_client);
 	LASSERT(rc == 0);

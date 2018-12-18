@@ -1335,10 +1335,14 @@ static int atyfb_set_par(struct fb_info *info)
 	par->accel_flags = var->accel_flags; /* hack */
 
 	if (var->accel_flags) {
-		info->fbops->fb_sync = atyfb_sync;
+		pax_open_kernel();
+		const_cast(info->fbops->fb_sync) = atyfb_sync;
+		pax_close_kernel();
 		info->flags &= ~FBINFO_HWACCEL_DISABLED;
 	} else {
-		info->fbops->fb_sync = NULL;
+		pax_open_kernel();
+		const_cast(info->fbops->fb_sync) = NULL;
+		pax_close_kernel();
 		info->flags |= FBINFO_HWACCEL_DISABLED;
 	}
 
@@ -1863,6 +1867,9 @@ static int atyfb_ioctl(struct fb_info *info, u_int cmd, u_long arg)
 		if (M64_HAS(INTEGRATED)) {
 			struct atyclk clk = { 0 };
 			union aty_pll *pll = &par->pll;
+
+			memset(&clk, 0, sizeof(clk));
+
 			u32 dsp_config = pll->ct.dsp_config;
 			u32 dsp_on_off = pll->ct.dsp_on_off;
 			clk.ref_clk_per = par->ref_clk_per;

@@ -404,7 +404,7 @@ int __genl_register_family(struct genl_family *family)
 
 	err = genl_validate_assign_mc_groups(family);
 	if (err)
-		goto errout_locked;
+		goto errout_free;
 
 	list_add_tail(&family->family_list, genl_family_chain(family->id));
 	genl_unlock_all();
@@ -417,6 +417,8 @@ int __genl_register_family(struct genl_family *family)
 
 	return 0;
 
+errout_free:
+	kfree(family->attrbuf);
 errout_locked:
 	genl_unlock_all();
 errout:
@@ -587,28 +589,26 @@ static int genl_family_rcv_msg(struct genl_family *family,
 			return -EOPNOTSUPP;
 
 		if (!family->parallel_ops) {
-			struct netlink_dump_control c = {
-				.module = family->module,
-				/* we have const, but the netlink API doesn't */
-				.data = (void *)ops,
+			static struct netlink_dump_control c = {
 				.start = genl_lock_start,
 				.dump = genl_lock_dumpit,
 				.done = genl_lock_done,
 			};
+			/* we have const, but the netlink API doesn't */
+			void *data = (void *)ops;
 
 			genl_unlock();
-			rc = __netlink_dump_start(net->genl_sock, skb, nlh, &c);
+			rc = __netlink_dump_start(net->genl_sock, skb, nlh, &c, data, family->module);
 			genl_lock();
 
 		} else {
-			struct netlink_dump_control c = {
-				.module = family->module,
+			netlink_dump_control_no_const c = {
 				.start = ops->start,
 				.dump = ops->dumpit,
 				.done = ops->done,
 			};
 
-			rc = __netlink_dump_start(net->genl_sock, skb, nlh, &c);
+			rc = __netlink_dump_start(net->genl_sock, skb, nlh, &c, NULL, family->module);
 		}
 
 		return rc;

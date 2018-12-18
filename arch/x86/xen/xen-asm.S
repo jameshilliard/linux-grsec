@@ -14,6 +14,7 @@
 #include <asm/asm-offsets.h>
 #include <asm/percpu.h>
 #include <asm/processor-flags.h>
+#include <asm/nospec-branch.h>
 
 #include "xen-asm.h"
 

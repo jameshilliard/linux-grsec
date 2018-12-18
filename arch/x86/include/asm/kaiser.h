@@ -1,6 +1,7 @@
 #ifndef _ASM_X86_KAISER_H
 #define _ASM_X86_KAISER_H
 
+#include <asm/page_types.h>
 #include <uapi/asm/processor-flags.h> /* For PCID constants */
 
 /*
@@ -19,7 +20,9 @@
 
 #define KAISER_SHADOW_PGD_OFFSET 0x1000
 
-#ifdef CONFIG_PAGE_TABLE_ISOLATION
+#ifdef CONFIG_PAX_PER_CPU_PGD
+#define KAISER_KERNEL_PGD_ALIGNMENT (PAGE_SIZE << 2)
+#elif defined(CONFIG_PAGE_TABLE_ISOLATION)
 /*
  *  A page table address must have this alignment to stay the same when
  *  KAISER_SHADOW_PGD_OFFSET mask is applied
@@ -127,7 +130,7 @@ static inline void __init kaiser_check_boottime_disable(void) {}
  *  synchronization has to be done.  the pages have to be
  *  manually unmapped again when they are not needed any longer.
  */
-extern int kaiser_add_mapping(unsigned long addr, unsigned long size, unsigned long flags);
+extern int kaiser_add_mapping(unsigned long addr, unsigned long size, u64 flags);
 
 /**
  *  kaiser_remove_mapping - unmap a virtual memory part of the shadow mapping

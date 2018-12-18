@@ -331,9 +331,9 @@ void rxrpc_fast_process_packet(struct rxrpc_call *call, struct sk_buff *skb)
 	/* track the latest serial number on this connection for ACK packet
 	 * information */
 	serial = ntohl(sp->hdr.serial);
-	hi_serial = atomic_read(&call->conn->hi_serial);
+	hi_serial = atomic_read_unchecked(&call->conn->hi_serial);
 	while (serial > hi_serial)
-		hi_serial = atomic_cmpxchg(&call->conn->hi_serial, hi_serial,
+		hi_serial = atomic_cmpxchg_unchecked(&call->conn->hi_serial, hi_serial,
 					   serial);
 
 	/* request ACK generation for any ACK or DATA packet that requests
@@ -775,6 +775,8 @@ cant_route_call:
 	if (sp->hdr.type != RXRPC_PACKET_TYPE_ABORT) {
 		_debug("reject type %d",sp->hdr.type);
 		rxrpc_reject_packet(local, skb);
+	} else {
+		rxrpc_free_skb(skb);
 	}
 	rxrpc_put_local(local);
 	_leave(" [no call]");

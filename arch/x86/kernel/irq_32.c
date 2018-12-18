@@ -11,6 +11,7 @@
 #include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/kernel_stat.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
@@ -24,6 +25,8 @@
 
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
 
+extern void gr_handle_kernel_exploit(void);
+
 int sysctl_panic_on_stackoverflow __read_mostly;
 
 /* Debugging check for stack overflow: is there less than 1KB free? */
@@ -34,13 +37,14 @@ static int check_stack_overflow(void)
 	__asm__ __volatile__("andl %%esp,%0" :
 			     "=r" (sp) : "0" (THREAD_SIZE - 1));
 
-	return sp < (sizeof(struct thread_info) + STACK_WARN);
+	return sp < STACK_WARN;
 }
 
 static void print_stack_overflow(void)
 {
 	printk(KERN_WARNING "low stack detected by irq handler\n");
 	dump_stack();
+	gr_handle_kernel_exploit();
 	if (sysctl_panic_on_stackoverflow)
 		panic("low stack detected by irq handler - check messages\n");
 }
@@ -56,7 +60,7 @@ DEFINE_PER_CPU(struct irq_stack *, softirq_stack);
 static void call_on_stack(void *func, void *stack)
 {
 	asm volatile("xchgl	%%ebx,%%esp	\n"
-		     CALL_NOSPEC
+		     PAX_INDIRECT_CALL("%[thunk_target]", "__do_softirq") "\n"
 		     "movl	%%ebx,%%esp	\n"
 		     : "=b" (stack)
 		     : "0" (stack),
@@ -71,10 +75,9 @@ static inline void *current_stack(void)
 
 static inline int execute_on_irq_stack(int overflow, struct irq_desc *desc)
 {
-	struct irq_stack *curstk, *irqstk;
+	struct irq_stack *irqstk;
 	u32 *isp, *prev_esp, arg1;
 
-	curstk = (struct irq_stack *) current_stack();
 	irqstk = __this_cpu_read(hardirq_stack);
 
 	/*
@@ -83,25 +86,34 @@ static inline int execute_on_irq_stack(int overflow, struct irq_desc *desc)
 	 * handler) we can't do that and just have to keep using the
 	 * current stack (which is the irq stack already after all)
 	 */
-	if (unlikely(curstk == irqstk))
+	if (unlikely((void *)current_stack_pointer - (void *)irqstk < THREAD_SIZE))
 		return 0;
 
-	isp = (u32 *) ((char *)irqstk + sizeof(*irqstk));
+	isp = (u32 *) ((char *)irqstk + sizeof(*irqstk) - 8);
 
 	/* Save the next esp at the bottom of the stack */
 	prev_esp = (u32 *)irqstk;
 	*prev_esp = current_stack_pointer;
 
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	__set_fs(MAKE_MM_SEG(0));
+#endif
+
 	if (unlikely(overflow))
 		call_on_stack(print_stack_overflow, isp);
 
 	asm volatile("xchgl	%%ebx,%%esp	\n"
-		     CALL_NOSPEC
+		     PAX_INDIRECT_CALL("%[thunk_target]", "handle_bad_irq") "\n"
 		     "movl	%%ebx,%%esp	\n"
 		     : "=a" (arg1), "=b" (isp)
 		     :  "0" (desc),   "1" (isp),
 			[thunk_target] "D" (desc->handle_irq)
 		     : "memory", "cc", "ecx");
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	__set_fs(current_thread_info()->addr_limit);
+#endif
+
 	return 1;
 }
 
@@ -110,32 +122,21 @@ static inline int execute_on_irq_stack(int overflow, struct irq_desc *desc)
  */
 void irq_ctx_init(int cpu)
 {
-	struct irq_stack *irqstk;
-
 	if (per_cpu(hardirq_stack, cpu))
 		return;
 
-	irqstk = page_address(alloc_pages_node(cpu_to_node(cpu),
-					       THREADINFO_GFP,
-					       THREAD_SIZE_ORDER));
-	per_cpu(hardirq_stack, cpu) = irqstk;
-
-	irqstk = page_address(alloc_pages_node(cpu_to_node(cpu),
-					       THREADINFO_GFP,
-					       THREAD_SIZE_ORDER));
-	per_cpu(softirq_stack, cpu) = irqstk;
-
-	printk(KERN_DEBUG "CPU %u irqstacks, hard=%p soft=%p\n",
-	       cpu, per_cpu(hardirq_stack, cpu),  per_cpu(softirq_stack, cpu));
+	per_cpu(hardirq_stack, cpu) = page_address(alloc_pages_node(cpu_to_node(cpu), THREADINFO_GFP, THREAD_SIZE_ORDER));
+	per_cpu(softirq_stack, cpu) = page_address(alloc_pages_node(cpu_to_node(cpu), THREADINFO_GFP, THREAD_SIZE_ORDER));
 }
 
 void do_softirq_own_stack(void)
 {
-	struct thread_info *curstk;
 	struct irq_stack *irqstk;
 	u32 *isp, *prev_esp;
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	bool is_xenpv = static_cpu_has(X86_FEATURE_XENPV);
+#endif
 
-	curstk = current_stack();
 	irqstk = __this_cpu_read(softirq_stack);
 
 	/* build the stack frame on the softirq stack */
@@ -145,7 +146,18 @@ void do_softirq_own_stack(void)
 	prev_esp = (u32 *)irqstk;
 	*prev_esp = current_stack_pointer;
 
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	if (!is_xenpv)
+		__set_fs(MAKE_MM_SEG(0));
+#endif
+
 	call_on_stack(__do_softirq, isp);
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	if (!is_xenpv)
+		__set_fs(current_thread_info()->addr_limit);
+#endif
+
 }
 
 bool handle_irq(struct irq_desc *desc, struct pt_regs *regs)

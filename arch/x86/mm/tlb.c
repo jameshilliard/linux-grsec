@@ -38,6 +38,7 @@ struct flush_tlb_info {
 	unsigned long flush_end;
 };
 
+#ifndef CONFIG_PAX_PER_CPU_PGD
 static void load_new_mm_cr3(pgd_t *pgdir)
 {
 	unsigned long new_mm_cr3 = __pa(pgdir);
@@ -67,6 +68,7 @@ static void load_new_mm_cr3(pgd_t *pgdir)
 	 */
 	write_cr3(new_mm_cr3);
 }
+#endif
 
 /*
  * We cannot call mmdrop() because we are in interrupt context,
@@ -79,7 +81,11 @@ void leave_mm(int cpu)
 		BUG();
 	if (cpumask_test_cpu(cpu, mm_cpumask(active_mm))) {
 		cpumask_clear_cpu(cpu, mm_cpumask(active_mm));
+
+#ifndef CONFIG_PAX_PER_CPU_PGD
 		load_new_mm_cr3(swapper_pg_dir);
+#endif
+
 		/*
 		 * This gets called in the idle path where RCU
 		 * functions differently.  Tracing normally
@@ -90,6 +96,66 @@ void leave_mm(int cpu)
 	}
 }
 EXPORT_SYMBOL_GPL(leave_mm);
+
+#ifdef CONFIG_PAX_PER_CPU_PGD
+void __clone_user_pgds(unsigned int cpu, enum cpu_pgd_type type, const struct mm_struct *mm)
+{
+	pgd_t *dst = get_cpu_pgd(cpu, type), *src = mm->pgd;
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (static_cpu_has(X86_FEATURE_UDEREF) && type == kernel) {
+		unsigned int i = USER_PGD_PTRS;
+
+		while (i--)
+			*dst++ = __pgd(pgd_val(*src++) | _PAGE_NX | _PAGE_USER);
+	} else
+#endif
+		memcpy(dst, src, USER_PGD_PTRS * sizeof(pgd_t));
+}
+#endif
+
+static void pax_switch_mm(struct mm_struct *next, unsigned int cpu)
+{
+
+#ifdef CONFIG_PAX_PER_CPU_PGD
+	pax_open_kernel();
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (static_cpu_has(X86_FEATURE_UDEREF)) {
+		__clone_user_pgds(cpu, user, next);
+
+		if (static_cpu_has(X86_FEATURE_SMAP))
+			__clone_user_pgds(cpu, kernel, next);
+		else
+			__clone_user_pgds(cpu, uaccess, next);
+	} else
+#endif
+		__clone_user_pgds(cpu, kernel, next);
+
+	pax_close_kernel();
+
+	BUG_ON((__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL) != (read_cr3() & __PHYSICAL_MASK));
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (static_cpu_has(X86_FEATURE_UDEREF) && static_cpu_has(X86_FEATURE_PCID)) {
+		if (static_cpu_has(X86_FEATURE_INVPCID)) {
+			invpcid_flush_single_context(PCID_USER);
+			if (static_cpu_has(X86_FEATURE_SMAP))
+				invpcid_flush_single_context(PCID_KERNEL);
+		} else {
+			write_cr3(__pa(get_cpu_pgd(cpu, uaccess)) | PCID_USER);
+			if (static_cpu_has(X86_FEATURE_SMAP))
+				load_cr3(get_cpu_pgd(cpu, kernel));
+			else
+				write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL | PCID_NOFLUSH);
+		}
+	} else
+#endif
+
+		load_cr3(get_cpu_pgd(cpu, kernel));
+#endif
+
+}
 
 void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	       struct task_struct *tsk)
@@ -105,6 +171,9 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 			struct task_struct *tsk)
 {
 	unsigned cpu = smp_processor_id();
+#if defined(CONFIG_X86_32) && defined(CONFIG_SMP) && (defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC))
+	int tlbstate = TLBSTATE_OK;
+#endif
 
 	if (likely(prev != next)) {
 		u64 last_ctx_id = this_cpu_read(cpu_tlbstate.last_ctx_id);
@@ -137,6 +206,9 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 		if (next != &init_mm)
 			this_cpu_write(cpu_tlbstate.last_ctx_id, next->context.ctx_id);
 
+#if defined(CONFIG_X86_32) && defined(CONFIG_SMP) && (defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC))
+		tlbstate = this_cpu_read(cpu_tlbstate.state);
+#endif
 		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
 		this_cpu_write(cpu_tlbstate.active_mm, next);
 		cpumask_set_cpu(cpu, mm_cpumask(next));
@@ -154,7 +226,7 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 		 * We need to prevent an outcome in which CPU 1 observes
 		 * the new PTE value and CPU 0 observes bit 1 clear in
 		 * mm_cpumask.  (If that occurs, then the IPI will never
-		 * be sent, and CPU 0's TLB will contain a stale entry.)
+		 * be sent, and CPU 1's TLB will contain a stale entry.)
 		 *
 		 * The bad outcome can occur if either CPU's load is
 		 * reordered before that CPU's store, so both CPUs must
@@ -169,7 +241,11 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 		 * ordering guarantee we need.
 		 *
 		 */
+#ifdef CONFIG_PAX_PER_CPU_PGD
+		pax_switch_mm(next, cpu);
+#else
 		load_new_mm_cr3(next->pgd);
+#endif
 
 		trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
 
@@ -195,7 +271,29 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 		if (unlikely(prev->context.ldt != next->context.ldt))
 			load_mm_ldt(next);
 #endif
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_PAGEEXEC) && defined(CONFIG_SMP)
+		if (!(__supported_pte_mask & _PAGE_NX)) {
+			smp_mb__before_atomic();
+			cpumask_clear_cpu(cpu, &prev->context.cpu_user_cs_mask);
+			smp_mb__after_atomic();
+			cpumask_set_cpu(cpu, &next->context.cpu_user_cs_mask);
+		}
+#endif
+
+#if defined(CONFIG_X86_32) && (defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC))
+		if (unlikely(prev->context.user_cs_base != next->context.user_cs_base ||
+			     prev->context.user_cs_limit != next->context.user_cs_limit))
+			set_user_cs(next->context.user_cs_base, next->context.user_cs_limit, cpu);
+#ifdef CONFIG_SMP
+		else if (unlikely(tlbstate != TLBSTATE_OK))
+			set_user_cs(next->context.user_cs_base, next->context.user_cs_limit, cpu);
+#endif
+#endif
+
 	} else {
+		pax_switch_mm(next, cpu);
+
 		this_cpu_write(cpu_tlbstate.state, TLBSTATE_OK);
 		BUG_ON(this_cpu_read(cpu_tlbstate.active_mm) != next);
 
@@ -216,10 +314,27 @@ void switch_mm_irqs_off(struct mm_struct *prev, struct mm_struct *next,
 			 * As above, load_cr3() is serializing and orders TLB
 			 * fills with respect to the mm_cpumask write.
 			 */
+
+#ifndef CONFIG_PAX_PER_CPU_PGD
 			load_new_mm_cr3(next->pgd);
 			trace_tlb_flush(TLB_FLUSH_ON_TASK_SWITCH, TLB_FLUSH_ALL);
+#endif
+
 			load_mm_cr4(next);
 			load_mm_ldt(next);
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_PAGEEXEC) && defined(CONFIG_SMP)
+			if (!(__supported_pte_mask & _PAGE_NX))
+				cpumask_set_cpu(cpu, &next->context.cpu_user_cs_mask);
+#endif
+
+#if defined(CONFIG_X86_32) && (defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC))
+#ifdef CONFIG_PAX_PAGEEXEC
+			if (!((next->pax_flags & MF_PAX_PAGEEXEC) && (__supported_pte_mask & _PAGE_NX)))
+#endif
+				set_user_cs(next->context.user_cs_base, next->context.user_cs_limit, cpu);
+#endif
+
 		}
 	}
 }

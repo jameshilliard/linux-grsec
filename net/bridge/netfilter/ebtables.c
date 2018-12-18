@@ -1528,6 +1528,8 @@ static int do_ebt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
 
+	tmp.name[sizeof(tmp.name) - 1] = '\0';
+
 	t = find_table_lock(net, tmp.name, &ret, &ebt_mutex);
 	if (!t)
 		return ret;
@@ -1550,7 +1552,7 @@ static int do_ebt_get_ctl(struct sock *sk, int cmd, void __user *user, int *len)
 			tmp.valid_hooks = t->table->valid_hooks;
 		}
 		mutex_unlock(&ebt_mutex);
-		if (copy_to_user(user, &tmp, *len) != 0) {
+		if (*len > sizeof(tmp) || copy_to_user(user, &tmp, *len) != 0) {
 			BUGPRINT("c2u Didn't work\n");
 			ret = -EFAULT;
 			break;
@@ -1805,8 +1807,13 @@ static int compat_table_info(const struct ebt_table_info *info,
 	const void *entries = info->entries;
 
 	newinfo->entries_size = size;
+	if (info->nentries) {
+		int ret = xt_compat_init_offsets(NFPROTO_BRIDGE,
+						 info->nentries);
+		if (ret)
+			return ret;
+	}
 
-	xt_compat_init_offsets(NFPROTO_BRIDGE, info->nentries);
 	return EBT_ENTRY_ITERATE(entries, size, compat_calc_entry, info,
 							entries, newinfo);
 }
@@ -2255,7 +2262,9 @@ static int compat_do_replace(struct net *net, void __user *user,
 
 	xt_compat_lock(NFPROTO_BRIDGE);
 
-	xt_compat_init_offsets(NFPROTO_BRIDGE, tmp.nentries);
+	ret = xt_compat_init_offsets(NFPROTO_BRIDGE, tmp.nentries);
+	if (ret < 0)
+		goto out_unlock;
 	ret = compat_copy_entries(entries_tmp, tmp.entries_size, &state);
 	if (ret < 0)
 		goto out_unlock;
@@ -2368,6 +2377,8 @@ static int compat_do_ebt_get_ctl(struct sock *sk, int cmd,
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
 
+	tmp.name[sizeof(tmp.name) - 1] = '\0';
+
 	t = find_table_lock(net, tmp.name, &ret, &ebt_mutex);
 	if (!t)
 		return ret;
@@ -2381,7 +2392,7 @@ static int compat_do_ebt_get_ctl(struct sock *sk, int cmd,
 			goto out;
 		tmp.valid_hooks = t->valid_hooks;
 
-		if (copy_to_user(user, &tmp, *len) != 0) {
+		if (*len > sizeof(tmp) || copy_to_user(user, &tmp, *len) != 0) {
 			ret = -EFAULT;
 			break;
 		}
@@ -2392,7 +2403,7 @@ static int compat_do_ebt_get_ctl(struct sock *sk, int cmd,
 		tmp.entries_size = t->table->entries_size;
 		tmp.valid_hooks = t->table->valid_hooks;
 
-		if (copy_to_user(user, &tmp, *len) != 0) {
+		if (*len > sizeof(tmp) || copy_to_user(user, &tmp, *len) != 0) {
 			ret = -EFAULT;
 			break;
 		}

@@ -337,15 +337,17 @@ static void btree_complete_write(struct btree *b, struct btree_write *w)
 	w->journal	= NULL;
 }
 
-static void btree_node_write_unlock(struct closure *cl)
+static void btree_node_write_unlock(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct btree *b = container_of(cl, struct btree, io);
 
 	up(&b->io_mutex);
 }
 
-static void __btree_node_write_done(struct closure *cl)
+static void __btree_node_write_done(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct btree *b = container_of(cl, struct btree, io);
 	struct btree_write *w = btree_prev_write(b);
 
@@ -359,8 +361,9 @@ static void __btree_node_write_done(struct closure *cl)
 	closure_return_with_destructor(cl, btree_node_write_unlock);
 }
 
-static void btree_node_write_done(struct closure *cl)
+static void btree_node_write_done(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct btree *b = container_of(cl, struct btree, io);
 	struct bio_vec *bv;
 	int n;
@@ -368,7 +371,7 @@ static void btree_node_write_done(struct closure *cl)
 	bio_for_each_segment_all(bv, b->bio, n)
 		__free_page(bv->bv_page);
 
-	__btree_node_write_done(cl);
+	__btree_node_write_done(&cl->work);
 }
 
 static void btree_node_write_endio(struct bio *bio)
@@ -468,7 +471,7 @@ void __bch_btree_node_write(struct btree *b, struct closure *parent)
 
 	do_btree_node_write(b);
 
-	atomic_long_add(set_blocks(i, block_bytes(b->c)) * b->c->sb.block_size,
+	atomic_long_add_unchecked(set_blocks(i, block_bytes(b->c)) * b->c->sb.block_size,
 			&PTR_CACHE(b->c, &b->key, 0)->btree_sectors_written);
 
 	b->written += set_blocks(i, block_bytes(b->c));

@@ -284,7 +284,6 @@ struct xfrm_dst;
 struct xfrm_policy_afinfo {
 	unsigned short		family;
 	struct dst_ops		*dst_ops;
-	void			(*garbage_collect)(struct net *net);
 	struct dst_entry	*(*dst_lookup)(struct net *net,
 					       int tos, int oif,
 					       const xfrm_address_t *saddr,
@@ -303,7 +302,7 @@ struct xfrm_policy_afinfo {
 					    struct net_device *dev,
 					    const struct flowi *fl);
 	struct dst_entry	*(*blackhole_route)(struct net *net, struct dst_entry *orig);
-};
+} __do_const;
 
 int xfrm_policy_register_afinfo(struct xfrm_policy_afinfo *afinfo);
 int xfrm_policy_unregister_afinfo(struct xfrm_policy_afinfo *afinfo);
@@ -342,7 +341,7 @@ struct xfrm_state_afinfo {
 	int			(*transport_finish)(struct sk_buff *skb,
 						    int async);
 	void			(*local_error)(struct sk_buff *skb, u32 mtu);
-};
+} __do_const;
 
 int xfrm_state_register_afinfo(struct xfrm_state_afinfo *afinfo);
 int xfrm_state_unregister_afinfo(struct xfrm_state_afinfo *afinfo);
@@ -437,7 +436,7 @@ struct xfrm_mode {
 	struct module *owner;
 	unsigned int encap;
 	int flags;
-};
+} __do_const;
 
 /* Flags for xfrm_mode. */
 enum {
@@ -532,7 +531,7 @@ struct xfrm_policy {
 	struct timer_list	timer;
 
 	struct flow_cache_object flo;
-	atomic_t		genid;
+	atomic_unchecked_t	genid;
 	u32			priority;
 	u32			index;
 	struct xfrm_mark	mark;
@@ -603,7 +602,7 @@ struct xfrm_mgr {
 					   int num_bundles,
 					   const struct xfrm_kmaddress *k);
 	bool			(*is_alive)(const struct km_event *c);
-};
+} __do_const;
 
 int xfrm_register_km(struct xfrm_mgr *km);
 int xfrm_unregister_km(struct xfrm_mgr *km);
@@ -1162,6 +1161,7 @@ static inline void xfrm_sk_free_policy(struct sock *sk)
 }
 
 void xfrm_garbage_collect(struct net *net);
+void xfrm_garbage_collect_deferred(struct net *net);
 
 #else
 
@@ -1198,6 +1198,9 @@ static inline int xfrm6_policy_check_reverse(struct sock *sk, int dir,
 	return 1;
 }
 static inline void xfrm_garbage_collect(struct net *net)
+{
+}
+static inline void xfrm_garbage_collect_deferred(struct net *net)
 {
 }
 #endif
@@ -1503,6 +1506,9 @@ int xfrm_init_state(struct xfrm_state *x);
 int xfrm_prepare_input(struct xfrm_state *x, struct sk_buff *skb);
 int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type);
 int xfrm_input_resume(struct sk_buff *skb, int nexthdr);
+int xfrm_trans_queue(struct sk_buff *skb,
+		     int (*finish)(struct net *, struct sock *,
+				   struct sk_buff *));
 int xfrm_output_resume(struct sk_buff *skb, int err);
 int xfrm_output(struct sock *sk, struct sk_buff *skb);
 int xfrm_inner_extract_output(struct xfrm_state *x, struct sk_buff *skb);

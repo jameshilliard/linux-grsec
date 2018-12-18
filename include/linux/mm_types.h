@@ -355,7 +355,9 @@ struct vm_area_struct {
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
 	struct vm_userfaultfd_ctx vm_userfaultfd_ctx;
-};
+
+	struct vm_area_struct *vm_mirror;/* PaX: mirror vma or NULL */
+} __randomize_layout;
 
 struct core_thread {
 	struct task_struct *task;
@@ -516,7 +518,25 @@ struct mm_struct {
 #ifdef CONFIG_HUGETLB_PAGE
 	atomic_long_t hugetlb_usage;
 #endif
-};
+
+#if defined(CONFIG_PAX_NOEXEC) || defined(CONFIG_PAX_ASLR)
+	unsigned long pax_flags;
+#endif
+
+#ifdef CONFIG_PAX_DLRESOLVE
+	unsigned long call_dl_resolve;
+#endif
+
+#if defined(CONFIG_PPC32) && defined(CONFIG_PAX_EMUSIGRT)
+	unsigned long call_syscall;
+#endif
+
+#ifdef CONFIG_PAX_ASLR
+	unsigned long delta_mmap;		/* randomized offset */
+	unsigned long delta_stack;		/* randomized offset */
+#endif
+
+} __randomize_layout;
 
 static inline void mm_init_cpumask(struct mm_struct *mm)
 {

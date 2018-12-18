@@ -52,7 +52,7 @@
 #include "altera_sgdma.h"
 #include "altera_msgdma.h"
 
-static atomic_t instance_count = ATOMIC_INIT(~0);
+static atomic_unchecked_t instance_count = ATOMIC_INIT(~0);
 /* Module parameters */
 static int debug = -1;
 module_param(debug, int, S_IRUGO | S_IWUSR);
@@ -563,7 +563,7 @@ static irqreturn_t altera_isr(int irq, void *dev_id)
  * physically contiguous fragment starting at
  * skb->data, for length of skb_headlen(skb).
  */
-static int tse_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t tse_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct altera_tse_private *priv = netdev_priv(dev);
 	unsigned int txsize = priv->tx_ring_size;
@@ -767,7 +767,7 @@ static int altera_tse_phy_get_addr_mdio_create(struct net_device *dev)
 
 	/* Create/attach to MDIO bus */
 	ret = altera_tse_mdio_create(dev,
-					 atomic_add_return(1, &instance_count));
+					 atomic_add_return_unchecked(1, &instance_count));
 
 	if (ret)
 		return -ENODEV;
@@ -827,6 +827,7 @@ static int init_phy(struct net_device *dev)
 		phydev = of_phy_connect(dev, phynode,
 			&altera_tse_adjust_link, 0, priv->phy_iface);
 	}
+	of_node_put(phynode);
 
 	if (!phydev) {
 		netdev_err(dev, "Could not find the PHY\n");
@@ -1255,7 +1256,7 @@ static int tse_shutdown(struct net_device *dev)
 	return 0;
 }
 
-static struct net_device_ops altera_tse_netdev_ops = {
+static net_device_ops_no_const altera_tse_netdev_ops __read_only = {
 	.ndo_open		= tse_open,
 	.ndo_stop		= tse_shutdown,
 	.ndo_start_xmit		= tse_start_xmit,
@@ -1492,11 +1493,13 @@ static int altera_tse_probe(struct platform_device *pdev)
 	ndev->netdev_ops = &altera_tse_netdev_ops;
 	altera_tse_set_ethtool_ops(ndev);
 
+	pax_open_kernel();
 	altera_tse_netdev_ops.ndo_set_rx_mode = tse_set_rx_mode;
 
 	if (priv->hash_filter)
 		altera_tse_netdev_ops.ndo_set_rx_mode =
 			tse_set_rx_mode_hashfilter;
+	pax_close_kernel();
 
 	/* Scatter/gather IO is not supported,
 	 * so it is turned off

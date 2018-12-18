@@ -1,5 +1,8 @@
+# Kernel does not boot with instrumentation of tlb.c.
+KCOV_INSTRUMENT_tlb.o	:= n
+
 obj-y	:=  init.o init_$(BITS).o fault.o ioremap.o extable.o pageattr.o mmap.o \
-	    pat.o pgtable.o physaddr.o gup.o setup_nx.o tlb.o
+	    pat.o pgtable.o physaddr.o gup.o setup_nx.o tlb.o cpu_entry_area.o
 
 # Make sure __phys_addr has no stackprotector
 nostackp := $(call cc-option, -fno-stack-protector)
@@ -33,3 +36,11 @@ obj-$(CONFIG_NUMA_EMU)		+= numa_emulation.o
 
 obj-$(CONFIG_X86_INTEL_MPX)	+= mpx.o
 obj-$(CONFIG_PAGE_TABLE_ISOLATION)		+= kaiser.o
+
+obj-$(CONFIG_X86_64)		+= uderef_64.o
+CFLAGS_uderef_64.o		:= -fcall-saved-rax -fcall-saved-rdi -fcall-saved-rsi -fcall-saved-rdx -fcall-saved-rcx -fcall-saved-r8 -fcall-saved-r9 -fcall-saved-r10 -fcall-saved-r11
+GCOV_PROFILE_uderef_64.o	:= n
+KASAN_SANITIZE_uderef_64.o	:= n
+UBSAN_SANITIZE_uderef_64.o	:= n
+KCOV_INSTRUMENT_uderef_64.o	:= n
+CFLAGS_REMOVE_uderef_64.o	= -pg

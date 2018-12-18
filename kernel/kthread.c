@@ -204,7 +204,6 @@ static int kthread(void *_create)
 	schedule();
 
 	ret = -EINTR;
-
 	if (!test_bit(KTHREAD_SHOULD_STOP, &self.flags)) {
 		cgroup_kthread_ready();
 		__kthread_parkme(&self);
@@ -606,6 +605,7 @@ repeat:
 		schedule();
 
 	try_to_freeze();
+	cond_resched();
 	goto repeat;
 }
 EXPORT_SYMBOL_GPL(kthread_worker_fn);

@@ -133,7 +133,7 @@ static int nft_limit_pkts_init(const struct nft_ctx *ctx,
 	if (err < 0)
 		return err;
 
-	priv->cost = div_u64(priv->limit.nsecs, priv->limit.rate);
+	priv->cost = div64_u64(priv->limit.nsecs, priv->limit.rate);
 	return 0;
 }
 
@@ -158,7 +158,7 @@ static void nft_limit_pkt_bytes_eval(const struct nft_expr *expr,
 				     const struct nft_pktinfo *pkt)
 {
 	struct nft_limit *priv = nft_expr_priv(expr);
-	u64 cost = div_u64(priv->nsecs * pkt->skb->len, priv->rate);
+	u64 cost = div64_u64(priv->nsecs * pkt->skb->len, priv->rate);
 
 	if (nft_limit_eval(priv, cost))
 		regs->verdict.code = NFT_BREAK;

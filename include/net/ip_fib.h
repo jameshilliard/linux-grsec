@@ -175,7 +175,7 @@ __be32 fib_info_update_nh_saddr(struct net *net, struct fib_nh *nh);
 
 #define FIB_RES_SADDR(net, res)				\
 	((FIB_RES_NH(res).nh_saddr_genid ==		\
-	  atomic_read(&(net)->ipv4.dev_addr_genid)) ?	\
+	  atomic_read_unchecked(&(net)->ipv4.dev_addr_genid)) ?	\
 	 FIB_RES_NH(res).nh_saddr :			\
 	 fib_info_update_nh_saddr((net), &FIB_RES_NH(res)))
 #define FIB_RES_GW(res)			(FIB_RES_NH(res).nh_gw)
@@ -356,6 +356,11 @@ static inline void fib_combine_itag(u32 *itag, const struct fib_result *res)
 }
 
 void free_fib_info(struct fib_info *fi);
+
+static inline void fib_info_hold(struct fib_info *fi)
+{
+	atomic_inc(&fi->fib_clntref);
+}
 
 static inline void fib_info_put(struct fib_info *fi)
 {

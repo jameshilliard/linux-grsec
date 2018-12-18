@@ -209,6 +209,8 @@ struct bpf_prog *bpf_patch_insn_single(struct bpf_prog *prog, u32 off,
 }
 
 #ifdef CONFIG_BPF_JIT
+extern long __rap_hash_call___bpf_prog_ret0;
+
 struct bpf_binary_header *
 bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 		     unsigned int alignment,
@@ -222,27 +224,45 @@ bpf_jit_binary_alloc(unsigned int proglen, u8 **image_ptr,
 	 * random section of illegal instructions.
 	 */
 	size = round_up(proglen + sizeof(*hdr) + 128, PAGE_SIZE);
-	hdr = module_alloc(size);
+	hdr = module_alloc_exec(size);
 	if (hdr == NULL)
 		return NULL;
 
 	/* Fill space with illegal/arch-dep instructions. */
 	bpf_fill_ill_insns(hdr, size);
 
+	pax_open_kernel();
 	hdr->pages = size / PAGE_SIZE;
+	pax_close_kernel();
+
 	hole = min_t(unsigned int, size - (proglen + sizeof(*hdr)),
 		     PAGE_SIZE - sizeof(*hdr));
+
+#ifdef CONFIG_PAX_RAP
+	hole -= 8;
+#endif
+
 	start = (prandom_u32() % hole) & ~(alignment - 1);
+
+#ifdef CONFIG_PAX_RAP
+	start += 8;
+#endif
 
 	/* Leave a random number of instructions before BPF code. */
 	*image_ptr = &hdr->image[start];
+
+#ifdef CONFIG_PAX_RAP
+	pax_open_kernel();
+	*(long *)(*image_ptr - 8) = (long)&__rap_hash_call___bpf_prog_ret0;
+	pax_close_kernel();
+#endif
 
 	return hdr;
 }
 
 void bpf_jit_binary_free(struct bpf_binary_header *hdr)
 {
-	module_memfree(hdr);
+	module_memfree_exec(hdr);
 }
 #endif /* CONFIG_BPF_JIT */
 
@@ -256,6 +276,11 @@ noinline u64 __bpf_call_base(u64 r1, u64 r2, u64 r3, u64 r4, u64 r5)
 }
 EXPORT_SYMBOL_GPL(__bpf_call_base);
 
+unsigned int __bpf_prog_ret0(const struct sk_buff *ctx, const struct bpf_insn *insn)
+{
+	return 0;
+}
+
 #ifndef CONFIG_BPF_JIT_ALWAYS_ON
 /**
  *	__bpf_prog_run - run eBPF program on a given context
@@ -264,7 +289,7 @@ EXPORT_SYMBOL_GPL(__bpf_call_base);
  *
  * Decode and execute eBPF instructions.
  */
-static unsigned int __bpf_prog_run(void *ctx, const struct bpf_insn *insn)
+unsigned int __bpf_prog_run(const struct sk_buff *ctx, const struct bpf_insn *insn)
 {
 	u64 stack[MAX_BPF_STACK / sizeof(u64)];
 	u64 regs[MAX_BPF_REG], tmp;
@@ -725,12 +750,6 @@ load_byte:
 		WARN_RATELIMIT(1, "unknown opcode %02x\n", insn->code);
 		return 0;
 }
-
-#else
-static unsigned int __bpf_prog_ret0(void *ctx, const struct bpf_insn *insn)
-{
-	return 0;
-}
 #endif
 
 bool bpf_prog_array_compatible(struct bpf_array *array,
@@ -780,9 +799,9 @@ static int bpf_check_tail_call(const struct bpf_prog *fp)
 int bpf_prog_select_runtime(struct bpf_prog *fp)
 {
 #ifndef CONFIG_BPF_JIT_ALWAYS_ON
-	fp->bpf_func = (void *) __bpf_prog_run;
+	fp->bpf_func = __bpf_prog_run;
 #else
-	fp->bpf_func = (void *) __bpf_prog_ret0;
+	fp->bpf_func = __bpf_prog_ret0;
 #endif
 
 	/* eBPF JITs can rewrite the program in case constant

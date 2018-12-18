@@ -184,8 +184,7 @@ void __putstr(const char *s)
 		}
 	}
 
-	if (real_mode->screen_info.orig_video_mode == 0 &&
-	    lines == 0 && cols == 0)
+	if (lines == 0 || cols == 0)
 		return;
 
 	x = real_mode->screen_info.orig_x;
@@ -259,7 +258,7 @@ static void handle_relocations(void *output, unsigned long output_len)
 	 * Calculate the delta between where vmlinux was linked to load
 	 * and where it was actually loaded.
 	 */
-	delta = min_addr - LOAD_PHYSICAL_ADDR;
+	delta = min_addr - ____LOAD_PHYSICAL_ADDR;
 	if (!delta) {
 		debug_putstr("No relocation needed... ");
 		return;
@@ -341,7 +340,7 @@ static void parse_elf(void *output)
 	Elf32_Ehdr ehdr;
 	Elf32_Phdr *phdrs, *phdr;
 #endif
-	void *dest;
+	void *dest, *prev;
 	int i;
 
 	memcpy(&ehdr, output, sizeof(ehdr));
@@ -372,13 +371,16 @@ static void parse_elf(void *output)
 #endif
 #ifdef CONFIG_RELOCATABLE
 			dest = output;
-			dest += (phdr->p_paddr - LOAD_PHYSICAL_ADDR);
+			dest += (phdr->p_paddr - ____LOAD_PHYSICAL_ADDR);
 #else
 			dest = (void *)(phdr->p_paddr);
 #endif
 			memcpy(dest,
 			       output + phdr->p_offset,
 			       phdr->p_filesz);
+			if (i)
+				memset(prev, 0xff, dest - prev);
+			prev = dest + phdr->p_filesz;
 			break;
 		default: /* Ignore other PT_* */ break;
 		}
@@ -447,7 +449,7 @@ asmlinkage __visible void *decompress_kernel(void *rmode, memptr heap,
 		error("Destination address too large");
 #endif
 #ifndef CONFIG_RELOCATABLE
-	if ((unsigned long)output != LOAD_PHYSICAL_ADDR)
+	if ((unsigned long)output != ____LOAD_PHYSICAL_ADDR)
 		error("Wrong destination address");
 #endif
 

@@ -60,6 +60,7 @@ static inline void x86_ce4100_early_setup(void) { }
 #ifndef _SETUP
 
 #include <asm/espfix.h>
+#include <asm/uaccess.h>
 #include <linux/kernel.h>
 
 /*
@@ -75,7 +76,7 @@ static inline bool kaslr_enabled(void)
 
 static inline unsigned long kaslr_offset(void)
 {
-	return (unsigned long)&_text - __START_KERNEL;
+	return ktla_ktva((unsigned long)&_text) - __START_KERNEL;
 }
 
 /*
@@ -119,11 +120,11 @@ void *extend_brk(size_t size, size_t align);
 extern void probe_roms(void);
 #ifdef __i386__
 
-asmlinkage void __init i386_start_kernel(void);
+asmlinkage void __init __noreturn i386_start_kernel(void);
 
 #else
-asmlinkage void __init x86_64_start_kernel(char *real_mode);
-asmlinkage void __init x86_64_start_reservations(char *real_mode_data);
+asmlinkage void __init __noreturn x86_64_start_kernel(char *real_mode);
+asmlinkage void __init __noreturn x86_64_start_reservations(char *real_mode_data);
 
 #endif /* __i386__ */
 #endif /* _SETUP */

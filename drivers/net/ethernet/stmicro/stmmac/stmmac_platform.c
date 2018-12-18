@@ -210,7 +210,7 @@ stmmac_probe_config_dt(struct platform_device *pdev, const char **mac)
 		dma_cfg = devm_kzalloc(&pdev->dev, sizeof(*dma_cfg),
 				       GFP_KERNEL);
 		if (!dma_cfg) {
-			of_node_put(np);
+			of_node_put(plat->phy_node);
 			return ERR_PTR(-ENOMEM);
 		}
 		plat->dma_cfg = dma_cfg;

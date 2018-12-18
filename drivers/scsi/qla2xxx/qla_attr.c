@@ -2214,7 +2214,7 @@ qla24xx_vport_disable(struct fc_vport *fc_vport, bool disable)
 	return 0;
 }
 
-struct fc_function_template qla2xxx_transport_functions = {
+fc_function_template_no_const qla2xxx_transport_functions = {
 
 	.show_host_node_name = 1,
 	.show_host_port_name = 1,
@@ -2262,7 +2262,7 @@ struct fc_function_template qla2xxx_transport_functions = {
 	.bsg_timeout = qla24xx_bsg_timeout,
 };
 
-struct fc_function_template qla2xxx_transport_vport_functions = {
+fc_function_template_no_const qla2xxx_transport_vport_functions = {
 
 	.show_host_node_name = 1,
 	.show_host_port_name = 1,

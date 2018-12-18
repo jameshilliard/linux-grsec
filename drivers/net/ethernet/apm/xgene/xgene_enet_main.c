@@ -130,7 +130,7 @@ static void xgene_enet_delete_bufpool(struct xgene_enet_desc_ring *buf_pool)
 	buf_pool->tail = tail;
 }
 
-static irqreturn_t xgene_enet_rx_irq(const int irq, void *data)
+static irqreturn_t xgene_enet_rx_irq(int irq, void *data)
 {
 	struct xgene_enet_desc_ring *rx_ring = data;
 
@@ -597,7 +597,7 @@ static int xgene_enet_process_ring(struct xgene_enet_desc_ring *ring,
 	return processed;
 }
 
-static int xgene_enet_napi(struct napi_struct *napi, const int budget)
+static int xgene_enet_napi(struct napi_struct *napi, int budget)
 {
 	struct xgene_enet_desc_ring *ring;
 	int processed;

@@ -967,10 +967,12 @@ static void init_once(void *foo)
 
 static int __init init_inodecache(void)
 {
-	ext4_inode_cachep = kmem_cache_create("ext4_inode_cache",
+	ext4_inode_cachep = kmem_cache_create_usercopy("ext4_inode_cache",
 					     sizeof(struct ext4_inode_info),
 					     0, (SLAB_RECLAIM_ACCOUNT|
 						SLAB_MEM_SPREAD),
+					     offsetof(struct ext4_inode_info, i_data),
+					     sizeof(((struct ext4_inode_info *)0)->i_data),
 					     init_once);
 	if (ext4_inode_cachep == NULL)
 		return -ENOMEM;
@@ -1278,7 +1280,7 @@ static ext4_fsblk_t get_sb_block(void **data)
 }
 
 #define DEFAULT_JOURNAL_IOPRIO (IOPRIO_PRIO_VALUE(IOPRIO_CLASS_BE, 3))
-static char deprecated_msg[] = "Mount option \"%s\" will be removed by %s\n"
+static const char deprecated_msg[] = "Mount option \"%s\" will be removed by %s\n"
 	"Contact linux-ext4@vger.kernel.org if you think we should keep it.\n";
 
 #ifdef CONFIG_QUOTA
@@ -2132,7 +2134,7 @@ static int ext4_check_descriptors(struct super_block *sb,
 			ext4_msg(sb, KERN_ERR, "ext4_check_descriptors: "
 				 "Block bitmap for group %u overlaps "
 				 "superblock", i);
-			if (!(sb->s_flags & MS_RDONLY))
+			if (!sb_rdonly(sb))
 				return 0;
 		}
 		if (block_bitmap >= sb_block + 1 &&
@@ -2154,7 +2156,7 @@ static int ext4_check_descriptors(struct super_block *sb,
 			ext4_msg(sb, KERN_ERR, "ext4_check_descriptors: "
 				 "Inode bitmap for group %u overlaps "
 				 "superblock", i);
-			if (!(sb->s_flags & MS_RDONLY))
+			if (!sb_rdonly(sb))
 				return 0;
 		}
 		if (inode_bitmap >= sb_block + 1 &&
@@ -2176,7 +2178,7 @@ static int ext4_check_descriptors(struct super_block *sb,
 			ext4_msg(sb, KERN_ERR, "ext4_check_descriptors: "
 				 "Inode table for group %u overlaps "
 				 "superblock", i);
-			if (!(sb->s_flags & MS_RDONLY))
+			if (!sb_rdonly(sb))
 				return 0;
 		}
 		if (inode_table >= sb_block + 1 &&

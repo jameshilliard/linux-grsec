@@ -1533,9 +1533,9 @@ static int smack_inode_listsecurity(struct inode *inode, char *buffer,
  */
 static void smack_inode_getsecid(const struct inode *inode, u32 *secid)
 {
-	struct inode_smack *isp = inode->i_security;
+	struct smack_known *skp = smk_of_inode(inode);
 
-	*secid = isp->smk_inode->smk_secid;
+	*secid = skp->smk_secid;
 }
 
 /*
@@ -2808,11 +2808,15 @@ static int smack_socket_connect(struct socket *sock, struct sockaddr *sap,
 #endif
 #ifdef SMACK_IPV6_SECMARK_LABELING
 	struct smack_known *rsp;
-	struct socket_smack *ssp = sock->sk->sk_security;
+	struct socket_smack *ssp;
 #endif
 
 	if (sock->sk == NULL)
 		return 0;
+
+#ifdef SMACK_IPV6_SECMARK_LABELING
+	ssp = sock->sk->sk_security;
+#endif
 
 	switch (sock->sk->sk_family) {
 	case PF_INET:
@@ -4562,16 +4566,14 @@ static int smack_inode_setsecctx(struct dentry *dentry, void *ctx, u32 ctxlen)
 
 static int smack_inode_getsecctx(struct inode *inode, void **ctx, u32 *ctxlen)
 {
-	int len = 0;
-	len = smack_inode_getsecurity(inode, XATTR_SMACK_SUFFIX, ctx, true);
+	struct smack_known *skp = smk_of_inode(inode);
 
-	if (len < 0)
-		return len;
-	*ctxlen = len;
+	*ctx = skp->smk_known;
+	*ctxlen = strlen(skp->smk_known);
 	return 0;
 }
 
-static struct security_hook_list smack_hooks[] = {
+static struct security_hook_list smack_hooks[] __read_only = {
 	LSM_HOOK_INIT(ptrace_access_check, smack_ptrace_access_check),
 	LSM_HOOK_INIT(ptrace_traceme, smack_ptrace_traceme),
 	LSM_HOOK_INIT(syslog, smack_syslog),

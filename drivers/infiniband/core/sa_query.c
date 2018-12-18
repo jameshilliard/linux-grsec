@@ -125,7 +125,7 @@ struct ib_sa_mcmember_query {
 
 static LIST_HEAD(ib_nl_request_list);
 static DEFINE_SPINLOCK(ib_nl_request_lock);
-static atomic_t ib_nl_sa_request_seq;
+static atomic_unchecked_t ib_nl_sa_request_seq;
 static struct workqueue_struct *ib_nl_wq;
 static struct delayed_work ib_nl_timed_work;
 static const struct nla_policy ib_nl_policy[LS_NLA_TYPE_MAX] = {
@@ -560,7 +560,7 @@ static int ib_nl_make_request(struct ib_sa_query *query, gfp_t gfp_mask)
 	int ret;
 
 	INIT_LIST_HEAD(&query->list);
-	query->seq = (u32)atomic_inc_return(&ib_nl_sa_request_seq);
+	query->seq = (u32)atomic_inc_return_unchecked(&ib_nl_sa_request_seq);
 
 	/* Put the request on the list first.*/
 	spin_lock_irqsave(&ib_nl_request_lock, flags);
@@ -1731,7 +1731,7 @@ static int __init ib_sa_init(void)
 
 	get_random_bytes(&tid, sizeof tid);
 
-	atomic_set(&ib_nl_sa_request_seq, 0);
+	atomic_set_unchecked(&ib_nl_sa_request_seq, 0);
 
 	ret = ib_register_client(&sa_client);
 	if (ret) {

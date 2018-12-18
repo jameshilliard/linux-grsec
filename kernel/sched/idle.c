@@ -206,7 +206,7 @@ DEFINE_PER_CPU(bool, cpu_dead_idle);
  *
  * Called with polling cleared.
  */
-static void cpu_idle_loop(void)
+static void __noreturn cpu_idle_loop(void)
 {
 	while (1) {
 		/*
@@ -278,7 +278,7 @@ static void cpu_idle_loop(void)
 	}
 }
 
-void cpu_startup_entry(enum cpuhp_state state)
+void __noreturn cpu_startup_entry(enum cpuhp_state state)
 {
 	/*
 	 * This #ifdef needs to die, but it's too late in the cycle to

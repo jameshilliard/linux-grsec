@@ -173,7 +173,7 @@ static int start_log_trans(struct btrfs_trans_handle *trans,
 		root->log_start_pid = current->pid;
 	}
 
-	atomic_inc(&root->log_batch);
+	atomic_inc_unchecked(&root->log_batch);
 	atomic_inc(&root->log_writers);
 	if (ctx) {
 		int index = root->log_transid % 2;
@@ -2763,7 +2763,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
 		wait_log_commit(root, log_transid - 1);
 
 	while (1) {
-		int batch = atomic_read(&root->log_batch);
+		int batch = atomic_read_unchecked(&root->log_batch);
 		/* when we're on an ssd, just kick the log commit out */
 		if (!btrfs_test_opt(root, SSD) &&
 		    test_bit(BTRFS_ROOT_MULTI_LOG_TASKS, &root->state)) {
@@ -2772,7 +2772,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
 			mutex_lock(&root->log_mutex);
 		}
 		wait_for_writer(root);
-		if (batch == atomic_read(&root->log_batch))
+		if (batch == atomic_read_unchecked(&root->log_batch))
 			break;
 	}
 
@@ -2818,7 +2818,7 @@ int btrfs_sync_log(struct btrfs_trans_handle *trans,
 	btrfs_init_log_ctx(&root_log_ctx);
 
 	mutex_lock(&log_root_tree->log_mutex);
-	atomic_inc(&log_root_tree->log_batch);
+	atomic_inc_unchecked(&log_root_tree->log_batch);
 	atomic_inc(&log_root_tree->log_writers);
 
 	index2 = log_root_tree->log_transid % 2;
@@ -4067,7 +4067,7 @@ static int log_one_extent(struct btrfs_trans_handle *trans,
 
 	if (ordered_io_err) {
 		ctx->io_err = -EIO;
-		return 0;
+		return ctx->io_err;
 	}
 
 	btrfs_init_map_token(&token);

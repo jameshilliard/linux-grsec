@@ -1328,7 +1328,7 @@ static int _drbd_send_ack(struct drbd_peer_device *peer_device, enum drbd_packet
 	p->sector = sector;
 	p->block_id = block_id;
 	p->blksize = blksize;
-	p->seq_num = cpu_to_be32(atomic_inc_return(&peer_device->device->packet_seq));
+	p->seq_num = cpu_to_be32(atomic_inc_return_unchecked(&peer_device->device->packet_seq));
 	return drbd_send_command(peer_device, sock, cmd, sizeof(*p), NULL, 0);
 }
 
@@ -1634,7 +1634,7 @@ int drbd_send_dblock(struct drbd_peer_device *peer_device, struct drbd_request *
 		return -EIO;
 	p->sector = cpu_to_be64(req->i.sector);
 	p->block_id = (unsigned long)req;
-	p->seq_num = cpu_to_be32(atomic_inc_return(&device->packet_seq));
+	p->seq_num = cpu_to_be32(atomic_inc_return_unchecked(&device->packet_seq));
 	dp_flags = bio_flags_to_wire(peer_device->connection, req->master_bio->bi_rw);
 	if (device->state.conn >= C_SYNC_SOURCE &&
 	    device->state.conn <= C_PAUSED_SYNC_T)
@@ -1793,15 +1793,6 @@ int drbd_send(struct drbd_connection *connection, struct socket *sock,
 		drbd_update_congested(connection);
 	}
 	do {
-		/* STRANGE
-		 * tcp_sendmsg does _not_ use its size parameter at all ?
-		 *
-		 * -EAGAIN on timeout, -EINTR on signal.
-		 */
-/* THINK
- * do we need to block DRBD_SIG if sock == &meta.socket ??
- * otherwise wake_asender() might interrupt some send_*Ack !
- */
 		rv = kernel_sendmsg(sock, &msg, &iov, 1, iov.iov_len);
 		if (rv == -EAGAIN) {
 			if (we_should_drop_the_connection(connection, sock))
@@ -1915,8 +1906,8 @@ void drbd_init_set_defaults(struct drbd_device *device)
 	atomic_set(&device->unacked_cnt, 0);
 	atomic_set(&device->local_cnt, 0);
 	atomic_set(&device->pp_in_use_by_net, 0);
-	atomic_set(&device->rs_sect_in, 0);
-	atomic_set(&device->rs_sect_ev, 0);
+	atomic_set_unchecked(&device->rs_sect_in, 0);
+	atomic_set_unchecked(&device->rs_sect_ev, 0);
 	atomic_set(&device->ap_in_flight, 0);
 	atomic_set(&device->md_io.in_use, 0);
 
@@ -2683,8 +2674,8 @@ void drbd_destroy_connection(struct kref *kref)
 	struct drbd_connection *connection = container_of(kref, struct drbd_connection, kref);
 	struct drbd_resource *resource = connection->resource;
 
-	if (atomic_read(&connection->current_epoch->epoch_size) !=  0)
-		drbd_err(connection, "epoch_size:%d\n", atomic_read(&connection->current_epoch->epoch_size));
+	if (atomic_read_unchecked(&connection->current_epoch->epoch_size) !=  0)
+		drbd_err(connection, "epoch_size:%d\n", atomic_read_unchecked(&connection->current_epoch->epoch_size));
 	kfree(connection->current_epoch);
 
 	idr_destroy(&connection->peer_devices);

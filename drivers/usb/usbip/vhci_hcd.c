@@ -254,8 +254,11 @@ static int vhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 	 */
 	usbip_dbg_vhci_rh("typeReq %x wValue %x wIndex %x\n", typeReq, wValue,
 			  wIndex);
-	if (wIndex > VHCI_NPORTS)
+	if (wIndex > VHCI_NPORTS) {
 		pr_err("invalid port number %d\n", wIndex);
+		return -EPIPE;
+	}
+
 	rhport = ((__u8)(wIndex & 0x00ff)) - 1;
 
 	dum = hcd_to_vhci(hcd);
@@ -452,7 +455,7 @@ static void vhci_tx_urb(struct urb *urb)
 
 	spin_lock_irqsave(&vdev->priv_lock, flags);
 
-	priv->seqnum = atomic_inc_return(&the_controller->seqnum);
+	priv->seqnum = atomic_inc_return_unchecked(&the_controller->seqnum);
 	if (priv->seqnum == 0xffff)
 		dev_info(&urb->dev->dev, "seqnum max\n");
 
@@ -693,7 +696,7 @@ static int vhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 			return -ENOMEM;
 		}
 
-		unlink->seqnum = atomic_inc_return(&the_controller->seqnum);
+		unlink->seqnum = atomic_inc_return_unchecked(&the_controller->seqnum);
 		if (unlink->seqnum == 0xffff)
 			pr_info("seqnum max\n");
 
@@ -901,7 +904,7 @@ static int vhci_start(struct usb_hcd *hcd)
 		vdev->rhport = rhport;
 	}
 
-	atomic_set(&vhci->seqnum, 0);
+	atomic_set_unchecked(&vhci->seqnum, 0);
 	spin_lock_init(&vhci->lock);
 
 	hcd->power_budget = 0; /* no limit */

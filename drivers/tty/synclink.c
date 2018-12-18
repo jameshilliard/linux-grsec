@@ -3090,7 +3090,7 @@ static void mgsl_close(struct tty_struct *tty, struct file * filp)
 	
 	if (debug_level >= DEBUG_LEVEL_INFO)
 		printk("%s(%d):mgsl_close(%s) entry, count=%d\n",
-			 __FILE__,__LINE__, info->device_name, info->port.count);
+			 __FILE__,__LINE__, info->device_name, atomic_read(&info->port.count));
 
 	if (tty_port_close_start(&info->port, tty, filp) == 0)
 		goto cleanup;
@@ -3108,7 +3108,7 @@ static void mgsl_close(struct tty_struct *tty, struct file * filp)
 cleanup:			
 	if (debug_level >= DEBUG_LEVEL_INFO)
 		printk("%s(%d):mgsl_close(%s) exit, count=%d\n", __FILE__,__LINE__,
-			tty->driver->name, info->port.count);
+			tty->driver->name, atomic_read(&info->port.count));
 			
 }	/* end of mgsl_close() */
 
@@ -3207,8 +3207,8 @@ static void mgsl_hangup(struct tty_struct *tty)
 
 	mgsl_flush_buffer(tty);
 	shutdown(info);
-	
-	info->port.count = 0;	
+
+	atomic_set(&info->port.count, 0);
 	info->port.flags &= ~ASYNC_NORMAL_ACTIVE;
 	info->port.tty = NULL;
 
@@ -3296,10 +3296,10 @@ static int block_til_ready(struct tty_struct *tty, struct file * filp,
 	
 	if (debug_level >= DEBUG_LEVEL_INFO)
 		printk("%s(%d):block_til_ready before block on %s count=%d\n",
-			 __FILE__,__LINE__, tty->driver->name, port->count );
+			 __FILE__,__LINE__, tty->driver->name, atomic_read(&port->count));
 
 	spin_lock_irqsave(&info->irq_spinlock, flags);
-	port->count--;
+	atomic_dec(&port->count);
 	spin_unlock_irqrestore(&info->irq_spinlock, flags);
 	port->blocked_open++;
 	
@@ -3326,7 +3326,7 @@ static int block_til_ready(struct tty_struct *tty, struct file * filp,
 		
 		if (debug_level >= DEBUG_LEVEL_INFO)
 			printk("%s(%d):block_til_ready blocking on %s count=%d\n",
-				 __FILE__,__LINE__, tty->driver->name, port->count );
+				 __FILE__,__LINE__, tty->driver->name, atomic_read(&port->count));
 				 
 		tty_unlock(tty);
 		schedule();
@@ -3338,12 +3338,12 @@ static int block_til_ready(struct tty_struct *tty, struct file * filp,
 	
 	/* FIXME: Racy on hangup during close wait */
 	if (!tty_hung_up_p(filp))
-		port->count++;
+		atomic_inc(&port->count);
 	port->blocked_open--;
 	
 	if (debug_level >= DEBUG_LEVEL_INFO)
 		printk("%s(%d):block_til_ready after blocking on %s count=%d\n",
-			 __FILE__,__LINE__, tty->driver->name, port->count );
+			 __FILE__,__LINE__, tty->driver->name, atomic_read(&port->count));
 			 
 	if (!retval)
 		port->flags |= ASYNC_NORMAL_ACTIVE;
@@ -3395,7 +3395,7 @@ static int mgsl_open(struct tty_struct *tty, struct file * filp)
 		
 	if (debug_level >= DEBUG_LEVEL_INFO)
 		printk("%s(%d):mgsl_open(%s), old ref count = %d\n",
-			 __FILE__,__LINE__,tty->driver->name, info->port.count);
+			 __FILE__,__LINE__,tty->driver->name, atomic_read(&info->port.count));
 
 	info->port.low_latency = (info->port.flags & ASYNC_LOW_LATENCY) ? 1 : 0;
 
@@ -3405,10 +3405,10 @@ static int mgsl_open(struct tty_struct *tty, struct file * filp)
 		spin_unlock_irqrestore(&info->netlock, flags);
 		goto cleanup;
 	}
-	info->port.count++;
+	atomic_inc(&info->port.count);
 	spin_unlock_irqrestore(&info->netlock, flags);
 
-	if (info->port.count == 1) {
+	if (atomic_read(&info->port.count) == 1) {
 		/* 1st open on this device, init hardware */
 		retval = startup(info);
 		if (retval < 0)
@@ -3432,8 +3432,8 @@ cleanup:
 	if (retval) {
 		if (tty->count == 1)
 			info->port.tty = NULL; /* tty layer will release tty struct */
-		if(info->port.count)
-			info->port.count--;
+		if (atomic_read(&info->port.count))
+			atomic_dec(&info->port.count);
 	}
 	
 	return retval;
@@ -7652,7 +7652,7 @@ static int hdlcdev_attach(struct net_device *dev, unsigned short encoding,
 	unsigned short new_crctype;
 
 	/* return error if TTY interface open */
-	if (info->port.count)
+	if (atomic_read(&info->port.count))
 		return -EBUSY;
 
 	switch (encoding)
@@ -7748,7 +7748,7 @@ static int hdlcdev_open(struct net_device *dev)
 
 	/* arbitrate between network and tty opens */
 	spin_lock_irqsave(&info->netlock, flags);
-	if (info->port.count != 0 || info->netcount != 0) {
+	if (atomic_read(&info->port.count) != 0 || info->netcount != 0) {
 		printk(KERN_WARNING "%s: hdlc_open returning busy\n", dev->name);
 		spin_unlock_irqrestore(&info->netlock, flags);
 		return -EBUSY;
@@ -7834,7 +7834,7 @@ static int hdlcdev_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		printk("%s:hdlcdev_ioctl(%s)\n",__FILE__,dev->name);
 
 	/* return error if TTY interface open */
-	if (info->port.count)
+	if (atomic_read(&info->port.count))
 		return -EBUSY;
 
 	if (cmd != SIOCWANDEV)

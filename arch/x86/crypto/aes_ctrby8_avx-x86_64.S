@@ -64,6 +64,7 @@
 
 #include <linux/linkage.h>
 #include <asm/inst.h>
+#include <asm/nospec-branch.h>
 
 #define CONCAT(a,b)	a##b
 #define VMOVDQ		vmovdqu

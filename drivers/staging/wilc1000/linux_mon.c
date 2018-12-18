@@ -26,7 +26,7 @@ struct wilc_wfi_radiotap_cb_hdr {
 
 static struct net_device *wilc_wfi_mon; /* global monitor netdev */
 
-extern int  mac_xmit(struct sk_buff *skb, struct net_device *dev);
+extern netdev_tx_t  mac_xmit(struct sk_buff *skb, struct net_device *dev);
 
 
 u8 srcAdd[6];

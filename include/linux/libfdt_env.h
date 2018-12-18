@@ -4,6 +4,7 @@
 #include <linux/string.h>
 
 #include <asm/byteorder.h>
+#include <asm/barrier.h>
 
 typedef __be16 fdt16_t;
 typedef __be32 fdt32_t;

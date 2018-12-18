@@ -960,7 +960,7 @@ static int ll_agl_thread(void *arg)
 	CDEBUG(D_READA, "agl thread started: sai %p, parent %pd\n",
 	       sai, parent);
 
-	atomic_inc(&sbi->ll_agl_total);
+	atomic_inc_unchecked(&sbi->ll_agl_total);
 	spin_lock(&plli->lli_agl_lock);
 	sai->sai_agl_valid = 1;
 	if (thread_is_init(thread))
@@ -1060,7 +1060,7 @@ static int ll_statahead_thread(void *arg)
 	if (sbi->ll_flags & LL_SBI_AGL_ENABLED)
 		ll_start_agl(parent, sai);
 
-	atomic_inc(&sbi->ll_sa_total);
+	atomic_inc_unchecked(&sbi->ll_sa_total);
 	spin_lock(&plli->lli_sa_lock);
 	if (thread_is_init(thread))
 		/* If someone else has changed the thread state
@@ -1478,7 +1478,7 @@ ll_sai_unplug(struct ll_statahead_info *sai, struct ll_sa_entry *entry)
 		sai->sai_miss++;
 		sai->sai_consecutive_miss++;
 		if (sa_low_hit(sai) && thread_is_running(thread)) {
-			atomic_inc(&sbi->ll_sa_wrong);
+			atomic_inc_unchecked(&sbi->ll_sa_wrong);
 			CDEBUG(D_READA, "Statahead for dir " DFID " hit ratio too low: hit/miss %llu/%llu, sent/replied %llu/%llu, stopping statahead thread\n",
 			       PFID(&lli->lli_fid), sai->sai_hit,
 			       sai->sai_miss, sai->sai_sent,

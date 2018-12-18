@@ -52,10 +52,10 @@ csum_partial_copy_from_user(const void __user *src, void *dst,
 			len -= 2;
 		}
 	}
-	stac();
-	isum = csum_partial_copy_generic((__force const void *)src,
+	__uaccess_begin();
+	isum = csum_partial_copy_generic((const void __force_kernel *)src,
 				dst, len, isum, errp, NULL);
-	clac();
+	__uaccess_end();
 	if (unlikely(*errp))
 		goto out_err;
 
@@ -109,10 +109,10 @@ csum_partial_copy_to_user(const void *src, void __user *dst,
 	}
 
 	*errp = 0;
-	stac();
-	ret = csum_partial_copy_generic(src, (void __force *)dst,
+	__uaccess_begin();
+	ret = csum_partial_copy_generic(src, (void __force_kernel *)dst,
 					len, isum, NULL, errp);
-	clac();
+	__uaccess_end();
 	return ret;
 }
 EXPORT_SYMBOL(csum_partial_copy_to_user);

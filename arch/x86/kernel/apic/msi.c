@@ -12,6 +12,7 @@
  */
 #include <linux/mm.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/pci.h>
 #include <linux/dmar.h>
 #include <linux/hpet.h>
@@ -267,7 +268,7 @@ static void hpet_msi_write_msg(struct irq_data *data, struct msi_msg *msg)
 	hpet_msi_write(irq_data_get_irq_handler_data(data), msg);
 }
 
-static struct irq_chip hpet_msi_controller = {
+static irq_chip_no_const hpet_msi_controller __read_only = {
 	.name = "HPET-MSI",
 	.irq_unmask = hpet_msi_unmask,
 	.irq_mask = hpet_msi_mask,

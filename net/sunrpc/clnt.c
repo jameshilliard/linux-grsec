@@ -286,7 +286,7 @@ static struct rpc_xprt *rpc_clnt_set_transport(struct rpc_clnt *clnt,
 
 static void rpc_clnt_set_nodename(struct rpc_clnt *clnt, const char *nodename)
 {
-	clnt->cl_nodelen = strlcpy(clnt->cl_nodename,
+	clnt->cl_nodelen = strlcpy_check(clnt->cl_nodename,
 			nodename, sizeof(clnt->cl_nodename));
 }
 
@@ -1441,7 +1441,9 @@ call_start(struct rpc_task *task)
 			(RPC_IS_ASYNC(task) ? "async" : "sync"));
 
 	/* Increment call count */
-	task->tk_msg.rpc_proc->p_count++;
+	pax_open_kernel();
+	(*(unsigned int *)&task->tk_msg.rpc_proc->p_count)++;
+	pax_close_kernel();
 	clnt->cl_stats->rpccnt++;
 	task->tk_action = call_reserve;
 }

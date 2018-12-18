@@ -16,8 +16,6 @@ void xen_syscall_target(void);
 void xen_syscall32_target(void);
 #endif
 
-extern void *xen_initial_gdt;
-
 struct trap_info;
 void xen_copy_trap_info(struct trap_info *traps);
 

@@ -60,6 +60,7 @@ static int __load_block_bitmap(struct super_block *sb,
 	if (block_group >= nr_groups) {
 		udf_debug("block_group (%d) > nr_groups (%d)\n",
 			  block_group, nr_groups);
+		return -EIO;
 	}
 
 	if (bitmap->s_block_bitmap[block_group])

@@ -60,11 +60,11 @@ static struct team_port *team_port_get_rtnl(const struct net_device *dev)
 static int __set_port_dev_addr(struct net_device *port_dev,
 			       const unsigned char *dev_addr)
 {
-	struct sockaddr addr;
+	struct sockaddr_storage addr;
 
-	memcpy(addr.sa_data, dev_addr, port_dev->addr_len);
-	addr.sa_family = port_dev->type;
-	return dev_set_mac_address(port_dev, &addr);
+	memcpy(addr.__data, dev_addr, port_dev->addr_len);
+	addr.ss_family = port_dev->type;
+	return dev_set_mac_address(port_dev, (struct sockaddr *)&addr);
 }
 
 static int team_port_set_orig_dev_addr(struct team_port *port)
@@ -2134,7 +2134,7 @@ static unsigned int team_get_num_rx_queues(void)
 	return TEAM_DEFAULT_NUM_RX_QUEUES;
 }
 
-static struct rtnl_link_ops team_link_ops __read_mostly = {
+static struct rtnl_link_ops team_link_ops = {
 	.kind			= DRV_NAME,
 	.priv_size		= sizeof(struct team),
 	.setup			= team_setup,
@@ -2936,7 +2936,7 @@ static int team_device_event(struct notifier_block *unused,
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block team_notifier_block __read_mostly = {
+static struct notifier_block team_notifier_block = {
 	.notifier_call = team_device_event,
 };
 

@@ -1278,8 +1278,8 @@ static int dtSplitUp(tid_t tid,
 				n = skip >> L2DTSLOTSIZE;
 				lv->offset = sp->header.stblindex + n;
 				lv->length =
-				    ((sp->header.nextindex -
-				      1) >> L2DTSLOTSIZE) - n + 1;
+				    ((sp->header.nextindex + (1 << L2DTSLOTSIZE) -
+				      1) >> L2DTSLOTSIZE) - n;
 				dtlck->index++;
 			}
 

@@ -21,6 +21,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .file "twofish-x86_64-asm-3way.S"
 .text
@@ -74,11 +75,11 @@
 #define RX2d %r10d
 
 #define RY0 %r11
-#define RY1 %r12
+#define RY1 %r14
 #define RY2 %r13
 
 #define RY0d %r11d
-#define RY1d %r12d
+#define RY1d %r14d
 #define RY2d %r13d
 
 #define RT0 %rdx
@@ -243,7 +244,7 @@ ENTRY(__twofish_enc_blk_3way)
 	 *	%rcx: bool, if true: xor output
 	 */
 	pushq %r13;
-	pushq %r12;
+	pushq %r14;
 	pushq %rbx;
 
 	pushq %rcx; /* bool xor */
@@ -271,27 +272,29 @@ ENTRY(__twofish_enc_blk_3way)
 	outunpack_enc3(mov);
 
 	popq %rbx;
-	popq %r12;
+	popq %r14;
 	popq %r13;
+	pax_force_retaddr
 	ret;
 
 .L__enc_xor3:
 	outunpack_enc3(xor);
 
 	popq %rbx;
-	popq %r12;
+	popq %r14;
 	popq %r13;
+	pax_force_retaddr
 	ret;
 ENDPROC(__twofish_enc_blk_3way)
 
-ENTRY(twofish_dec_blk_3way)
+RAP_ENTRY(twofish_dec_blk_3way)
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
 	 *	%rdx: src, RIO
 	 */
 	pushq %r13;
-	pushq %r12;
+	pushq %r14;
 	pushq %rbx;
 
 	pushq %rsi; /* dst */
@@ -314,7 +317,8 @@ ENTRY(twofish_dec_blk_3way)
 	outunpack_dec3();
 
 	popq %rbx;
-	popq %r12;
+	popq %r14;
 	popq %r13;
+	pax_force_retaddr
 	ret;
 ENDPROC(twofish_dec_blk_3way)

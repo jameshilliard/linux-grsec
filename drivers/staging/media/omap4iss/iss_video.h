@@ -88,7 +88,7 @@ struct iss_pipeline {
 	struct iss_video *input;
 	struct iss_video *output;
 	unsigned int entities;
-	atomic_t frame_number;
+	atomic_unchecked_t frame_number;
 	bool do_propagation; /* of frame number */
 	bool error;
 	struct v4l2_fract max_timeperframe;

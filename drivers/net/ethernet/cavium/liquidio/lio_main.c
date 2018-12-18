@@ -475,7 +475,7 @@ static void stop_pci_io(struct octeon_device *oct)
  * this device has been detected.
  */
 static pci_ers_result_t liquidio_pcie_error_detected(struct pci_dev *pdev,
-						     pci_channel_state_t state)
+						     enum pci_channel_state state)
 {
 	struct octeon_device *oct = pci_get_drvdata(pdev);
 
@@ -1726,7 +1726,7 @@ static void if_cfg_callback(struct octeon_device *oct,
 	if (resp->status)
 		dev_err(&oct->pci_dev->dev, "nic if cfg instruction failed. Status: %llx\n",
 			CVM_CAST64(resp->status));
-	ACCESS_ONCE(ctx->cond) = 1;
+	ACCESS_ONCE_RW(ctx->cond) = 1;
 
 	/* This barrier is required to be sure that the response has been
 	 * written fully before waking up the handler
@@ -2664,7 +2664,7 @@ static inline u32 get_ipv6_5tuple_tag(struct sk_buff *skb)
  * @returns whether the packet was transmitted to the device okay or not
  *             (NETDEV_TX_OK or NETDEV_TX_BUSY)
  */
-static int liquidio_xmit(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t liquidio_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct lio *lio;
 	struct octnet_buf_free_info *finfo;
@@ -3177,7 +3177,7 @@ static int setup_nic_devices(struct octeon_device *octeon_dev)
 		dev_dbg(&octeon_dev->pci_dev->dev,
 			"requesting config for interface %d, iqs %d, oqs %d\n",
 			i, num_iqueues, num_oqueues);
-		ACCESS_ONCE(ctx->cond) = 0;
+		ACCESS_ONCE_RW(ctx->cond) = 0;
 		ctx->octeon_id = lio_get_device_id(octeon_dev);
 		init_waitqueue_head(&ctx->wc);
 
@@ -3240,8 +3240,11 @@ static int setup_nic_devices(struct octeon_device *octeon_dev)
 		props = &octeon_dev->props[i];
 		props->netdev = netdev;
 
-		if (num_iqueues > 1)
-			lionetdevops.ndo_select_queue = select_q;
+		if (num_iqueues > 1) {
+			pax_open_kernel();
+			const_cast(lionetdevops.ndo_select_queue) = select_q;
+			pax_close_kernel();
+		}
 
 		/* Associate the routines that will handle different
 		 * netdev tasks.

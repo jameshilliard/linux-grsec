@@ -205,7 +205,7 @@ int lov_packmd(struct obd_export *exp, struct lov_mds_md **lmmp,
 	lmmv1->lmm_pattern = cpu_to_le32(lsm->lsm_pattern);
 	lmmv1->lmm_layout_gen = cpu_to_le16(lsm->lsm_layout_gen);
 	if (lsm->lsm_magic == LOV_MAGIC_V3) {
-		cplen = strlcpy(lmmv3->lmm_pool_name, lsm->lsm_pool_name,
+		cplen = strlcpy_check(lmmv3->lmm_pool_name, lsm->lsm_pool_name,
 				sizeof(lmmv3->lmm_pool_name));
 		if (cplen >= sizeof(lmmv3->lmm_pool_name))
 			return -E2BIG;

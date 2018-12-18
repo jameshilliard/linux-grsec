@@ -46,7 +46,7 @@
 #endif
 
 extern bool g_obtainingIP;
-extern void resolve_disconnect_aberration(void *drvHandler);
+extern void resolve_disconnect_aberration(struct host_if_drv *drvHandler);
 extern u8 gau8MulticastMacAddrList[WILC_MULTICAST_TABLE_SIZE][ETH_ALEN];
 extern struct timer_list hDuringIpTimer;
 
@@ -101,7 +101,7 @@ extern void WILC_WFI_p2p_rx(struct net_device *dev, u8 *buff, u32 size);
 
 static void linux_wlan_tx_complete(void *priv, int status);
 static int  mac_init_fn(struct net_device *ndev);
-int  mac_xmit(struct sk_buff *skb, struct net_device *dev);
+netdev_tx_t mac_xmit(struct sk_buff *skb, struct net_device *dev);
 int  mac_open(struct net_device *ndev);
 int  mac_close(struct net_device *ndev);
 static struct net_device_stats *mac_stats(struct net_device *dev);
@@ -1358,7 +1358,7 @@ static void linux_wlan_tx_complete(void *priv, int status)
 	kfree(pv_data);
 }
 
-int mac_xmit(struct sk_buff *skb, struct net_device *ndev)
+netdev_tx_t mac_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	perInterface_wlan_t *nic;
 	struct tx_complete_data *tx_data = NULL;

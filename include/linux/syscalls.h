@@ -102,7 +102,14 @@ union bpf_attr;
 #define __TYPE_IS_L(t)	(__same_type((t)0, 0L))
 #define __TYPE_IS_UL(t)	(__same_type((t)0, 0UL))
 #define __TYPE_IS_LL(t) (__same_type((t)0, 0LL) || __same_type((t)0, 0ULL))
-#define __SC_LONG(t, a) __typeof(__builtin_choose_expr(__TYPE_IS_LL(t), 0LL, 0L)) a
+#define __SC_TYPE(t) __typeof__(				\
+	__builtin_choose_expr(					\
+		sizeof(t) > sizeof(int),			\
+		(t) 0,						\
+		__builtin_choose_expr(__type_is_unsigned(t), 0UL, 0L)	\
+	))
+#define __SC_LONG(t, a)	__SC_TYPE(t) a
+#define __SC_WRAP(t, a)	(__SC_TYPE(t)) a
 #define __SC_CAST(t, a)	(t) a
 #define __SC_ARGS(t, a)	a
 #define __SC_TEST(t, a) (void)BUILD_BUG_ON_ZERO(!__TYPE_IS_LL(t) && sizeof(t) > sizeof(long))
@@ -192,20 +199,21 @@ extern struct trace_event_functions exit_syscall_print_funcs;
 
 #define __PROTECT(...) asmlinkage_protect(__VA_ARGS__)
 #define __SYSCALL_DEFINEx(x, name, ...)					\
-	asmlinkage long sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))	\
-		__attribute__((alias(__stringify(SyS##name))));		\
 	static inline long SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__));	\
-	asmlinkage long SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__));	\
-	asmlinkage long SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__))	\
+	static inline asmlinkage long SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__))	\
 	{								\
 		long ret = SYSC##name(__MAP(x,__SC_CAST,__VA_ARGS__));	\
 		__MAP(x,__SC_TEST,__VA_ARGS__);				\
 		__PROTECT(x, ret,__MAP(x,__SC_ARGS,__VA_ARGS__));	\
 		return ret;						\
 	}								\
+	asmlinkage long sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))	\
+	{								\
+		return SyS##name(__MAP(x,__SC_WRAP,__VA_ARGS__));	\
+	}								\
 	static inline long SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__))
 
-asmlinkage long sys32_quotactl(unsigned int cmd, const char __user *special,
+asmlinkage long compat_sys_x86_quotactl(unsigned int cmd, const char __user *special,
 			       qid_t id, void __user *addr);
 asmlinkage long sys_time(time_t __user *tloc);
 asmlinkage long sys_stime(time_t __user *tptr);
@@ -384,11 +392,11 @@ asmlinkage long sys_sync(void);
 asmlinkage long sys_fsync(unsigned int fd);
 asmlinkage long sys_fdatasync(unsigned int fd);
 asmlinkage long sys_bdflush(int func, long data);
-asmlinkage long sys_mount(char __user *dev_name, char __user *dir_name,
-				char __user *type, unsigned long flags,
+asmlinkage long sys_mount(const char __user *dev_name, const char __user *dir_name,
+				const char __user *type, unsigned long flags,
 				void __user *data);
-asmlinkage long sys_umount(char __user *name, int flags);
-asmlinkage long sys_oldumount(char __user *name);
+asmlinkage long sys_umount(const char __user *name, int flags);
+asmlinkage long sys_oldumount(const char __user *name);
 asmlinkage long sys_truncate(const char __user *path, long length);
 asmlinkage long sys_ftruncate(unsigned int fd, unsigned long length);
 asmlinkage long sys_stat(const char __user *filename,
@@ -457,7 +465,7 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 			unsigned long prot, unsigned long pgoff,
 			unsigned long flags);
 asmlinkage long sys_msync(unsigned long start, size_t len, int flags);
-asmlinkage long sys_fadvise64(int fd, loff_t offset, size_t len, int advice);
+asmlinkage long sys_fadvise64(int fd, loff_t offset, loff_t len, int advice);
 asmlinkage long sys_fadvise64_64(int fd, loff_t offset, loff_t len, int advice);
 asmlinkage long sys_munmap(unsigned long addr, size_t len);
 asmlinkage long sys_mlock(unsigned long start, size_t len);
@@ -604,7 +612,7 @@ asmlinkage long sys_getsockname(int, struct sockaddr __user *, int __user *);
 asmlinkage long sys_getpeername(int, struct sockaddr __user *, int __user *);
 asmlinkage long sys_send(int, void __user *, size_t, unsigned);
 asmlinkage long sys_sendto(int, void __user *, size_t, unsigned,
-				struct sockaddr __user *, int);
+				struct sockaddr __user *, int) __intentional_overflow(0);
 asmlinkage long sys_sendmsg(int fd, struct user_msghdr __user *msg, unsigned flags);
 asmlinkage long sys_sendmmsg(int fd, struct mmsghdr __user *msg,
 			     unsigned int vlen, unsigned flags);
@@ -663,10 +671,10 @@ asmlinkage long sys_msgctl(int msqid, int cmd, struct msqid_ds __user *buf);
 
 asmlinkage long sys_semget(key_t key, int nsems, int semflg);
 asmlinkage long sys_semop(int semid, struct sembuf __user *sops,
-				unsigned nsops);
+				long nsops);
 asmlinkage long sys_semctl(int semid, int semnum, int cmd, unsigned long arg);
 asmlinkage long sys_semtimedop(int semid, struct sembuf __user *sops,
-				unsigned nsops,
+				long nsops,
 				const struct timespec __user *timeout);
 asmlinkage long sys_shmat(int shmid, char __user *shmaddr, int shmflg);
 asmlinkage long sys_shmget(key_t key, size_t size, int flag);
@@ -700,7 +708,7 @@ asmlinkage long sys_sysfs(int option,
 				unsigned long arg1, unsigned long arg2);
 asmlinkage long sys_syslog(int type, char __user *buf, int len);
 asmlinkage long sys_uselib(const char __user *library);
-asmlinkage long sys_ni_syscall(void);
+asmlinkage long sys_ni_syscall(unsigned long, unsigned long, unsigned long, unsigned long, unsigned long, unsigned long);
 asmlinkage long sys_ptrace(long request, long pid, unsigned long addr,
 			   unsigned long data);
 
@@ -879,7 +887,7 @@ asmlinkage long sys_seccomp(unsigned int op, unsigned int flags,
 			    const char __user *uargs);
 asmlinkage long sys_getrandom(char __user *buf, size_t count,
 			      unsigned int flags);
-asmlinkage long sys_bpf(int cmd, union bpf_attr *attr, unsigned int size);
+asmlinkage long sys_bpf(int cmd, union bpf_attr __user *attr, unsigned int size);
 
 asmlinkage long sys_execveat(int dfd, const char __user *filename,
 			const char __user *const __user *argv,

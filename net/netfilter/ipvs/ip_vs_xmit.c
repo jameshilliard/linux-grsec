@@ -168,7 +168,7 @@ static inline bool crosses_local_route_boundary(int skb_af, struct sk_buff *skb,
 						bool new_rt_is_local)
 {
 	bool rt_mode_allow_local = !!(rt_mode & IP_VS_RT_MODE_LOCAL);
-	bool rt_mode_allow_non_local = !!(rt_mode & IP_VS_RT_MODE_LOCAL);
+	bool rt_mode_allow_non_local = !!(rt_mode & IP_VS_RT_MODE_NON_LOCAL);
 	bool rt_mode_allow_redirect = !!(rt_mode & IP_VS_RT_MODE_RDR);
 	bool source_is_loopback;
 	bool old_rt_is_local;
@@ -1268,7 +1268,7 @@ ip_vs_icmp_xmit(struct sk_buff *skb, struct ip_vs_conn *cp,
 		else
 			rc = NF_ACCEPT;
 		/* do not touch skb anymore */
-		atomic_inc(&cp->in_pkts);
+		atomic_inc_unchecked(&cp->in_pkts);
 		goto out;
 	}
 
@@ -1361,7 +1361,7 @@ ip_vs_icmp_xmit_v6(struct sk_buff *skb, struct ip_vs_conn *cp,
 		else
 			rc = NF_ACCEPT;
 		/* do not touch skb anymore */
-		atomic_inc(&cp->in_pkts);
+		atomic_inc_unchecked(&cp->in_pkts);
 		goto out;
 	}
 

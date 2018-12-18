@@ -56,7 +56,7 @@ static inline void native_write_cr3(unsigned long val)
 	asm volatile("mov %0,%%cr3": : "r" (val), "m" (__force_order));
 }
 
-static inline unsigned long native_read_cr4(void)
+extern inline unsigned long native_read_cr4(void)
 {
 	unsigned long val;
 	asm volatile("mov %%cr4,%0\n\t" : "=r" (val), "=m" (__force_order));
@@ -139,7 +139,7 @@ static inline void write_cr3(unsigned long x)
 	native_write_cr3(x);
 }
 
-static inline unsigned long __read_cr4(void)
+extern inline unsigned long __read_cr4(void)
 {
 	return native_read_cr4();
 }

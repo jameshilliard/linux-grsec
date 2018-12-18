@@ -15,7 +15,7 @@
 #define _X	0x40	/* hex digit */
 #define _SP	0x80	/* hard space (0x20) */
 
-extern const unsigned char _ctype[];
+extern const unsigned char _ctype[256];
 
 #define __ismask(x) (_ctype[(int)(unsigned char)(x)])
 
@@ -56,7 +56,7 @@ static inline unsigned char __toupper(unsigned char c)
  * Fast implementation of tolower() for internal usage. Do not use in your
  * code.
  */
-static inline char _tolower(const char c)
+static inline unsigned char _tolower(const unsigned char c)
 {
 	return c | 0x20;
 }

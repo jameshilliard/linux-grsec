@@ -840,10 +840,11 @@ __cpufreq_cooling_register(struct device_node *np,
 	cpumask_copy(&cpufreq_dev->allowed_cpus, clip_cpus);
 
 	if (capacitance) {
-		cpufreq_cooling_ops.get_requested_power =
-			cpufreq_get_requested_power;
-		cpufreq_cooling_ops.state2power = cpufreq_state2power;
-		cpufreq_cooling_ops.power2state = cpufreq_power2state;
+		pax_open_kernel();
+		const_cast(cpufreq_cooling_ops.get_requested_power) = cpufreq_get_requested_power;
+		const_cast(cpufreq_cooling_ops.state2power) = cpufreq_state2power;
+		const_cast(cpufreq_cooling_ops.power2state) = cpufreq_power2state;
+		pax_close_kernel();
 		cpufreq_dev->plat_get_static_power = plat_static_func;
 
 		ret = build_dyn_power_table(cpufreq_dev, capacitance);

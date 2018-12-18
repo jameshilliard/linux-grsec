@@ -24,7 +24,7 @@
 
 struct kmem_cache *bch_search_cache;
 
-static void bch_data_insert_start(struct closure *);
+static void bch_data_insert_start(struct work_struct *);
 
 static unsigned cache_mode(struct cached_dev *dc, struct bio *bio)
 {
@@ -53,8 +53,9 @@ static void bio_csum(struct bio *bio, struct bkey *k)
 
 /* Insert data into cache */
 
-static void bch_data_insert_keys(struct closure *cl)
+static void bch_data_insert_keys(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct data_insert_op *op = container_of(cl, struct data_insert_op, cl);
 	atomic_t *journal_ref = NULL;
 	struct bkey *replace_key = op->replace ? &op->replace_key : NULL;
@@ -143,8 +144,9 @@ out:
 	continue_at(cl, bch_data_insert_keys, op->wq);
 }
 
-static void bch_data_insert_error(struct closure *cl)
+static void bch_data_insert_error(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct data_insert_op *op = container_of(cl, struct data_insert_op, cl);
 
 	/*
@@ -170,7 +172,7 @@ static void bch_data_insert_error(struct closure *cl)
 
 	op->insert_keys.top = dst;
 
-	bch_data_insert_keys(cl);
+	bch_data_insert_keys(&cl->work);
 }
 
 static void bch_data_insert_endio(struct bio *bio)
@@ -191,8 +193,9 @@ static void bch_data_insert_endio(struct bio *bio)
 	bch_bbio_endio(op->c, bio, bio->bi_error, "writing data to cache");
 }
 
-static void bch_data_insert_start(struct closure *cl)
+static void bch_data_insert_start(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct data_insert_op *op = container_of(cl, struct data_insert_op, cl);
 	struct bio *bio = op->bio, *n;
 
@@ -311,8 +314,9 @@ err:
  * If s->bypass is true, instead of inserting the data it invalidates the
  * region of the cache represented by s->cache_bio and op->inode.
  */
-void bch_data_insert(struct closure *cl)
+void bch_data_insert(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct data_insert_op *op = container_of(cl, struct data_insert_op, cl);
 
 	trace_bcache_write(op->c, op->inode, op->bio,
@@ -320,7 +324,7 @@ void bch_data_insert(struct closure *cl)
 
 	bch_keylist_init(&op->insert_keys);
 	bio_get(op->bio);
-	bch_data_insert_start(cl);
+	bch_data_insert_start(&cl->work);
 }
 
 /* Congested? */
@@ -569,8 +573,9 @@ static int cache_lookup_fn(struct btree_op *op, struct btree *b, struct bkey *k)
 	return n == bio ? MAP_DONE : MAP_CONTINUE;
 }
 
-static void cache_lookup(struct closure *cl)
+static void cache_lookup(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, iop.cl);
 	struct bio *bio = &s->bio.bio;
 	int ret;
@@ -630,8 +635,9 @@ static void do_bio_hook(struct search *s, struct bio *orig_bio)
 	bio_cnt_set(bio, 3);
 }
 
-static void search_free(struct closure *cl)
+static void search_free(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 
 	if (s->iop.bio)
@@ -676,19 +682,21 @@ static inline struct search *search_alloc(struct bio *bio,
 
 /* Cached devices */
 
-static void cached_dev_bio_complete(struct closure *cl)
+static void cached_dev_bio_complete(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 	struct cached_dev *dc = container_of(s->d, struct cached_dev, disk);
 
-	search_free(cl);
+	search_free(&cl->work);
 	cached_dev_put(dc);
 }
 
 /* Process reads */
 
-static void cached_dev_cache_miss_done(struct closure *cl)
+static void cached_dev_cache_miss_done(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 
 	if (s->iop.replace_collision)
@@ -702,11 +710,12 @@ static void cached_dev_cache_miss_done(struct closure *cl)
 			__free_page(bv->bv_page);
 	}
 
-	cached_dev_bio_complete(cl);
+	cached_dev_bio_complete(&cl->work);
 }
 
-static void cached_dev_read_error(struct closure *cl)
+static void cached_dev_read_error(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 	struct bio *bio = &s->bio.bio;
 
@@ -732,8 +741,9 @@ static void cached_dev_read_error(struct closure *cl)
 	continue_at(cl, cached_dev_cache_miss_done, NULL);
 }
 
-static void cached_dev_read_done(struct closure *cl)
+static void cached_dev_read_done(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 	struct cached_dev *dc = container_of(s->d, struct cached_dev, disk);
 
@@ -772,8 +782,9 @@ static void cached_dev_read_done(struct closure *cl)
 	continue_at(cl, cached_dev_cache_miss_done, NULL);
 }
 
-static void cached_dev_read_done_bh(struct closure *cl)
+static void cached_dev_read_done_bh(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 	struct cached_dev *dc = container_of(s->d, struct cached_dev, disk);
 
@@ -873,13 +884,14 @@ static void cached_dev_read(struct cached_dev *dc, struct search *s)
 
 /* Process writes */
 
-static void cached_dev_write_complete(struct closure *cl)
+static void cached_dev_write_complete(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 	struct cached_dev *dc = container_of(s->d, struct cached_dev, disk);
 
 	up_read_non_owner(&dc->writeback_lock);
-	cached_dev_bio_complete(cl);
+	cached_dev_bio_complete(&cl->work);
 }
 
 static void cached_dev_write(struct cached_dev *dc, struct search *s)
@@ -951,8 +963,9 @@ static void cached_dev_write(struct cached_dev *dc, struct search *s)
 	continue_at(cl, cached_dev_write_complete, NULL);
 }
 
-static void cached_dev_nodata(struct closure *cl)
+static void cached_dev_nodata(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 	struct bio *bio = &s->bio.bio;
 
@@ -1072,8 +1085,9 @@ static int flash_dev_cache_miss(struct btree *b, struct search *s,
 	return MAP_CONTINUE;
 }
 
-static void flash_dev_nodata(struct closure *cl)
+static void flash_dev_nodata(struct work_struct *work)
 {
+	struct closure *cl = container_of(work, struct closure, work);
 	struct search *s = container_of(cl, struct search, cl);
 
 	if (s->iop.flush_journal)

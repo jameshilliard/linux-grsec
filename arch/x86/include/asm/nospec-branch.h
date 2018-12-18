@@ -70,16 +70,51 @@
 	ret
 .endm
 
+.macro RETPOLINE_PUSH_JMP target:req
+	pushq	\target
+	call	.Ldo_rop_\@
+.Lspec_trap_\@:
+	pause
+	lfence
+	jmp	.Lspec_trap_\@
+.Ldo_rop_\@:
+#ifdef CONFIG_64BIT
+	lea	8(%_ASM_SP), %_ASM_SP
+#else
+	lea	4(%_ASM_SP), %_ASM_SP
+#endif
+	ret
+.endm
+
+.macro RETPOLINE_RET size:req
+	call	.Ldo_ret_\@
+.Lspec_trap_\@:
+	pause
+	lfence
+	jmp	.Lspec_trap_\@
+.Ldo_ret_\@:
+	lea	\size(%_ASM_SP), %_ASM_SP
+	ret
+.endm
+
 /*
  * This is a wrapper around RETPOLINE_JMP so the called function in reg
  * returns to the instruction after the macro.
  */
-.macro RETPOLINE_CALL reg:req
+.macro RETPOLINE_CALL reg:req extra:req
 	jmp	.Ldo_call_\@
 .Ldo_retpoline_jmp_\@:
 	RETPOLINE_JMP \reg
 .Ldo_call_\@:
-	call	.Ldo_retpoline_jmp_\@
+	pax_direct_call .Ldo_retpoline_jmp_\@, \extra
+.endm
+
+.macro RETPOLINE_PUSH_CALL target:req extra:req
+	jmp	.Ldo_call_\@
+.Ldo_retpoline_jmp_\@:
+	RETPOLINE_PUSH_JMP \target
+.Ldo_call_\@:
+	pax_direct_call .Ldo_retpoline_jmp_\@, \extra
 .endm
 
 /*
@@ -89,6 +124,16 @@
  */
 .macro JMP_NOSPEC reg:req
 #ifdef CONFIG_RETPOLINE
+	ALTERNATIVE_2 __stringify(jmp *%\reg),					\
+		__stringify(jmp __x86_indirect_thunk_\reg), X86_FEATURE_RETPOLINE,	\
+		__stringify(lfence; jmp *%\reg), X86_FEATURE_RETPOLINE_AMD
+#else
+	jmp	*%\reg
+#endif
+.endm
+
+.macro JMP_NOSPEC_INLINE reg:req
+#ifdef CONFIG_RETPOLINE
 	ALTERNATIVE_2 __stringify(jmp *\reg),				\
 		__stringify(RETPOLINE_JMP \reg), X86_FEATURE_RETPOLINE,	\
 		__stringify(lfence; jmp *\reg), X86_FEATURE_RETPOLINE_AMD
@@ -97,13 +142,45 @@
 #endif
 .endm
 
-.macro CALL_NOSPEC reg:req
+.macro CALL_NOSPEC reg:req extra:req
 #ifdef CONFIG_RETPOLINE
-	ALTERNATIVE_2 __stringify(call *\reg),				\
-		__stringify(RETPOLINE_CALL \reg), X86_FEATURE_RETPOLINE,\
-		__stringify(lfence; call *\reg), X86_FEATURE_RETPOLINE_AMD
+	ALTERNATIVE_2 __stringify(pax_indirect_call %\reg, \extra),		\
+		__stringify(pax_direct_call __x86_indirect_thunk_\reg, \extra), X86_FEATURE_RETPOLINE,\
+		__stringify(lfence; pax_indirect_call %\reg, \extra), X86_FEATURE_RETPOLINE_AMD
 #else
-	call	*\reg
+	pax_indirect_call %\reg, \extra
+#endif
+.endm
+
+.macro CALL_NOSPEC_INLINE target:req extra:req
+#ifdef CONFIG_RETPOLINE
+	ALTERNATIVE_2_PREPAD __stringify(pax_indirect_call \target, \extra),		\
+		__stringify(RETPOLINE_PUSH_CALL \target, \extra), X86_FEATURE_RETPOLINE,\
+		__stringify(lfence; pax_indirect_call \target, \extra), X86_FEATURE_RETPOLINE_AMD
+#else
+	pax_indirect_call \target, \extra
+#endif
+.endm
+
+.macro __CALL_NOSPEC reg:req
+#ifdef CONFIG_RETPOLINE
+	ALTERNATIVE_2_PREPAD __stringify(call *%\reg),				\
+		__stringify(call __x86_indirect_thunk_\reg), X86_FEATURE_RETPOLINE,\
+		__stringify(lfence; call *%\reg), X86_FEATURE_RETPOLINE_AMD
+#else
+	call *%\reg
+#endif
+.endm
+
+.macro RET_NOSPEC
+#ifdef CONFIG_RETPOLINE
+#ifdef CONFIG_64BIT
+	ALTERNATIVE "ret", __stringify(RETPOLINE_RET 8), X86_FEATURE_RETPOLINE
+#else
+	ALTERNATIVE "ret", __stringify(RETPOLINE_RET 4), X86_FEATURE_RETPOLINE
+#endif
+#else
+	ret
 #endif
 .endm
 
@@ -120,20 +197,41 @@
 #endif
 .endm
 
+.macro INVLUTLB
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	ALTERNATIVE "", "or $-1, %eax ; invlpg (%eax)", X86_BUG_SPEC_SEGMENT_LIMIT_BYPASS
+#endif
+.endm
+
 #else /* __ASSEMBLY__ */
 
 #if defined(CONFIG_X86_64) && defined(RETPOLINE)
 
+# if defined(RETPOLINE_PLUGIN) && GCC_VERSION < 40600
+#  define CALL_NOSPEC						\
+	ALTERNATIVE_2(						\
+	"call *%[thunk_target]\n",				\
+	"call __x86_indirect_thunk_rax\n",			\
+	X86_FEATURE_RETPOLINE,					\
+	"lfence;\n"						\
+	"call *%[thunk_target]\n",				\
+	X86_FEATURE_RETPOLINE_AMD)
+#  define THUNK_TARGET(addr) [thunk_target] "a" (addr)
+# else
 /*
  * Since the inline asm uses the %V modifier which is only in newer GCC,
  * the 64-bit one is dependent on RETPOLINE not CONFIG_RETPOLINE.
  */
-# define CALL_NOSPEC						\
-	ALTERNATIVE(						\
+#  define CALL_NOSPEC						\
+	ALTERNATIVE_2(						\
 	"call *%[thunk_target]\n",				\
 	"call __x86_indirect_thunk_%V[thunk_target]\n",		\
-	X86_FEATURE_RETPOLINE)
+	X86_FEATURE_RETPOLINE,					\
+	"lfence;\n"						\
+	"call *%[thunk_target]\n",				\
+	X86_FEATURE_RETPOLINE_AMD)
 # define THUNK_TARGET(addr) [thunk_target] "r" (addr)
+# endif
 
 #elif defined(CONFIG_X86_32) && defined(CONFIG_RETPOLINE)
 /*
@@ -141,7 +239,7 @@
  * otherwise we'll run out of registers. We don't care about CET
  * here, anyway.
  */
-# define CALL_NOSPEC ALTERNATIVE("call *%[thunk_target]\n",	\
+# define CALL_NOSPEC ALTERNATIVE_2("call *%[thunk_target]\n",	\
 	"       jmp    904f;\n"					\
 	"       .align 16\n"					\
 	"901:	call   903f;\n"					\
@@ -154,12 +252,23 @@
 	"       ret;\n"						\
 	"       .align 16\n"					\
 	"904:	call   901b;\n",				\
-	X86_FEATURE_RETPOLINE)
+	X86_FEATURE_RETPOLINE,					\
+	"lfence;\n"						\
+	"call *%[thunk_target]\n",				\
+	X86_FEATURE_RETPOLINE_AMD)
 
-# define THUNK_TARGET(addr) [thunk_target] "rm" (addr)
+# ifdef CONFIG_X86_64
+#  define THUNK_TARGET(addr) [thunk_target] "rm" (addr)
+# else
+#  define THUNK_TARGET(addr) [thunk_target] "m" (addr)
+# endif
 #else /* No retpoline for C / inline asm */
 # define CALL_NOSPEC "call *%[thunk_target]\n"
-# define THUNK_TARGET(addr) [thunk_target] "rm" (addr)
+# ifdef CONFIG_X86_64
+#  define THUNK_TARGET(addr) [thunk_target] "rm" (addr)
+# else
+#  define THUNK_TARGET(addr) [thunk_target] "m" (addr)
+# endif
 #endif
 
 /* The Spectre V2 mitigation variants */
@@ -170,6 +279,7 @@ enum spectre_v2_mitigation {
 	SPECTRE_V2_RETPOLINE_GENERIC,
 	SPECTRE_V2_RETPOLINE_AMD,
 	SPECTRE_V2_IBRS,
+	SPECTRE_V2_IBRS_ENHANCED,
 };
 
 /* The Speculative Store Bypass disable variants */

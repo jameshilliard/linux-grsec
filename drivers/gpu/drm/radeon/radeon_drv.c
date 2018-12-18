@@ -130,7 +130,7 @@ extern int radeon_get_crtc_scanoutpos(struct drm_device *dev, unsigned int crtc,
 				      const struct drm_display_mode *mode);
 extern bool radeon_is_px(struct drm_device *dev);
 extern const struct drm_ioctl_desc radeon_ioctls_kms[];
-extern int radeon_max_kms_ioctl;
+extern const int radeon_max_kms_ioctl;
 int radeon_mmap(struct file *filp, struct vm_area_struct *vma);
 int radeon_mode_dumb_mmap(struct drm_file *filp,
 			  struct drm_device *dev,
@@ -566,7 +566,7 @@ static struct drm_driver kms_driver = {
 	.driver_features =
 	    DRIVER_USE_AGP |
 	    DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED | DRIVER_GEM |
-	    DRIVER_PRIME | DRIVER_RENDER,
+	    DRIVER_PRIME | DRIVER_RENDER | DRIVER_MODESET,
 	.load = radeon_driver_load_kms,
 	.open = radeon_driver_open_kms,
 	.preclose = radeon_driver_preclose_kms,
@@ -650,8 +650,11 @@ static int __init radeon_init(void)
 		DRM_INFO("radeon kernel modesetting enabled.\n");
 		driver = &kms_driver;
 		pdriver = &radeon_kms_pci_driver;
-		driver->driver_features |= DRIVER_MODESET;
-		driver->num_ioctls = radeon_max_kms_ioctl;
+
+		pax_open_kernel();
+		const_cast(driver->num_ioctls) = radeon_max_kms_ioctl;
+		pax_close_kernel();
+
 		radeon_register_atpx_handler();
 
 	} else {
@@ -659,8 +662,10 @@ static int __init radeon_init(void)
 		DRM_INFO("radeon userspace modesetting enabled.\n");
 		driver = &driver_old;
 		pdriver = &radeon_pci_driver;
-		driver->driver_features &= ~DRIVER_MODESET;
-		driver->num_ioctls = radeon_max_ioctl;
+
+		pax_open_kernel();
+		const_cast(driver->num_ioctls) = radeon_max_ioctl;
+		pax_close_kernel();
 #else
 		DRM_ERROR("No UMS support in radeon module!\n");
 		return -EINVAL;

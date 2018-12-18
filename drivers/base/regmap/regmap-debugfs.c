@@ -401,7 +401,7 @@ static ssize_t regmap_access_read_file(struct file *file,
 				       char __user *user_buf, size_t count,
 				       loff_t *ppos)
 {
-	int reg_len, tot_len;
+	size_t reg_len, tot_len;
 	size_t buf_pos = 0;
 	loff_t p = 0;
 	ssize_t ret;
@@ -434,7 +434,7 @@ static ssize_t regmap_access_read_file(struct file *file,
 			/* Format the register */
 			snprintf(buf + buf_pos, count - buf_pos,
 				 "%.*x: %c %c %c %c\n",
-				 reg_len, i,
+				 (int)reg_len, i,
 				 regmap_readable(map, i) ? 'y' : 'n',
 				 regmap_writeable(map, i) ? 'y' : 'n',
 				 regmap_volatile(map, i) ? 'y' : 'n',

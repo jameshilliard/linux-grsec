@@ -76,9 +76,8 @@ MODULE_PARM_DESC(runpm, "disable (0), force enable (1), optimus only default (-1
 int nouveau_runtime_pm = -1;
 module_param_named(runpm, nouveau_runtime_pm, int, 0400);
 
-static struct drm_driver driver_stub;
 static struct drm_driver driver_pci;
-static struct drm_driver driver_platform;
+static drm_driver_no_const driver_platform __read_only;
 
 static u64
 nouveau_pci_name(struct pci_dev *pdev)
@@ -927,7 +926,7 @@ nouveau_driver_fops = {
 };
 
 static struct drm_driver
-driver_stub = {
+driver_pci = {
 	.driver_features =
 		DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME | DRIVER_RENDER |
 		DRIVER_KMS_LEGACY_CONTEXT,
@@ -938,6 +937,8 @@ driver_stub = {
 	.preclose = nouveau_drm_preclose,
 	.postclose = nouveau_drm_postclose,
 	.lastclose = nouveau_vga_lastclose,
+
+	.set_busid = drm_pci_set_busid,
 
 #if defined(CONFIG_DEBUG_FS)
 	.debugfs_init = nouveau_debugfs_init,
@@ -1076,10 +1077,10 @@ err_free:
 static int __init
 nouveau_drm_init(void)
 {
-	driver_pci = driver_stub;
-	driver_pci.set_busid = drm_pci_set_busid;
-	driver_platform = driver_stub;
+	pax_open_kernel();
+	driver_platform = driver_pci;
 	driver_platform.set_busid = drm_platform_set_busid;
+	pax_close_kernel();
 
 	nouveau_display_options();
 

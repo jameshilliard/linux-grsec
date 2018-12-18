@@ -21,7 +21,7 @@
  * that would just muddy the log. So we report the first one and
  * shut up after that.
  */
-int debug_locks = 1;
+int debug_locks = IS_ENABLED(CONFIG_LOCKDEP);
 EXPORT_SYMBOL_GPL(debug_locks);
 
 /*

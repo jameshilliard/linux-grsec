@@ -250,7 +250,7 @@ cttimeout_get_timeout(struct sock *ctnl, struct sk_buff *skb,
 	struct ctnl_timeout *cur;
 
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {
-		struct netlink_dump_control c = {
+		static struct netlink_dump_control c = {
 			.dump = ctnl_timeout_dump,
 		};
 		return netlink_dump_start(ctnl, skb, nlh, &c);
@@ -324,16 +324,16 @@ static int ctnl_timeout_try_del(struct ctnl_timeout *timeout)
 {
 	int ret = 0;
 
-	/* we want to avoid races with nf_ct_timeout_find_get. */
-	if (atomic_dec_and_test(&timeout->refcnt)) {
+	/* We want to avoid races with ctnl_timeout_put. So only when the
+	 * current refcnt is 1, we decrease it to 0.
+	 */
+	if (atomic_cmpxchg(&timeout->refcnt, 1, 0) == 1) {
 		/* We are protected by nfnl mutex. */
 		list_del_rcu(&timeout->head);
 		nf_ct_l4proto_put(timeout->l4proto);
 		ctnl_untimeout(timeout);
 		kfree_rcu(timeout, rcu_head);
 	} else {
-		/* still in use, restore reference counter. */
-		atomic_inc(&timeout->refcnt);
 		ret = -EBUSY;
 	}
 	return ret;
@@ -345,18 +345,18 @@ cttimeout_del_timeout(struct sock *ctnl, struct sk_buff *skb,
 		      const struct nlattr * const cda[])
 {
 	char *name;
-	struct ctnl_timeout *cur;
+	struct ctnl_timeout *cur, *tmp;
 	int ret = -ENOENT;
 
 	if (!cda[CTA_TIMEOUT_NAME]) {
-		list_for_each_entry(cur, &cttimeout_list, head)
+		list_for_each_entry_safe(cur, tmp, &cttimeout_list, head)
 			ctnl_timeout_try_del(cur);
 
 		return 0;
 	}
 	name = nla_data(cda[CTA_TIMEOUT_NAME]);
 
-	list_for_each_entry(cur, &cttimeout_list, head) {
+	list_for_each_entry_safe(cur, tmp, &cttimeout_list, head) {
 		if (strncmp(cur->name, name, CTNL_TIMEOUT_NAME_MAX) != 0)
 			continue;
 
@@ -537,7 +537,9 @@ err:
 
 static void ctnl_timeout_put(struct ctnl_timeout *timeout)
 {
-	atomic_dec(&timeout->refcnt);
+	if (atomic_dec_and_test(&timeout->refcnt))
+		kfree_rcu(timeout, rcu_head);
+
 	module_put(THIS_MODULE);
 }
 #endif /* CONFIG_NF_CONNTRACK_TIMEOUT */

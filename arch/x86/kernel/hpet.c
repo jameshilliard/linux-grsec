@@ -1,6 +1,7 @@
 #include <linux/clocksource.h>
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/export.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
@@ -136,7 +137,7 @@ int is_hpet_enabled(void)
 }
 EXPORT_SYMBOL_GPL(is_hpet_enabled);
 
-static void _hpet_print_config(const char *function, int line)
+static void __nocapture(1) _hpet_print_config(const char *function, int line)
 {
 	u32 i, timers, l, h;
 	printk(KERN_INFO "hpet: %s(%d):\n", function, line);
@@ -774,7 +775,6 @@ static struct clocksource clocksource_hpet = {
 	.mask		= HPET_MASK,
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 	.resume		= hpet_resume_counter,
-	.archdata	= { .vclock_mode = VCLOCK_HPET },
 };
 
 static int hpet_clocksource_register(void)

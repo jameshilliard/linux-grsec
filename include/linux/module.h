@@ -19,9 +19,11 @@
 #include <linux/jump_label.h>
 #include <linux/export.h>
 #include <linux/rbtree_latch.h>
+#include <linux/fs.h>
 
 #include <linux/percpu.h>
 #include <asm/module.h>
+#include <asm/pgtable.h>
 
 /* In stripped ARM and x86-64 modules, ~ is surprisingly rare. */
 #define MODULE_SIG_STRING "~Module signature appended~\n"
@@ -44,7 +46,7 @@ struct module_kobject {
 	struct kobject *drivers_dir;
 	struct module_param_attrs *mp;
 	struct completion *kobj_completion;
-};
+} __randomize_layout;
 
 struct module_attribute {
 	struct attribute attr;
@@ -56,12 +58,13 @@ struct module_attribute {
 	int (*test)(struct module *);
 	void (*free)(struct module *);
 };
+typedef struct module_attribute __no_const module_attribute_no_const;
 
 struct module_version_attribute {
 	struct module_attribute mattr;
 	const char *module_name;
 	const char *version;
-} __attribute__ ((__aligned__(sizeof(void *))));
+} __do_const __attribute__ ((__aligned__(sizeof(void *))));
 
 extern ssize_t __modver_version_show(struct module_attribute *,
 				     struct module_kobject *, char *);
@@ -131,7 +134,7 @@ extern void cleanup_module(void);
 
 /* This is only required if you want to be unloadable. */
 #define module_exit(exitfn)					\
-	static inline exitcall_t __exittest(void)		\
+	static inline exitcall_t __used __section(.discard.module_exit) __exittest(void)	\
 	{ return exitfn; }					\
 	void cleanup_module(void) __attribute__((alias(#exitfn)));
 
@@ -319,7 +322,7 @@ struct module {
 
 	/* Sysfs stuff. */
 	struct module_kobject mkobj;
-	struct module_attribute *modinfo_attrs;
+	module_attribute_no_const *modinfo_attrs;
 	const char *version;
 	const char *srcversion;
 	struct kobject *holders_dir;
@@ -376,20 +379,21 @@ struct module {
 	 * If this is non-NULL, vfree() after init() returns.
 	 *
 	 * Cacheline align here, such that:
-	 *   module_init, module_core, init_size, core_size,
+	 *   module_init_*, module_core_*, init_size_*, core_size_*,
 	 *   init_text_size, core_text_size and mtn_core::{mod,node[0]}
 	 * are on the same cacheline.
 	 */
-	void *module_init	____cacheline_aligned;
+	void *module_init_rw	____cacheline_aligned;
+	void *module_init_rx;
 
 	/* Here is the actual code + data, vfree'd on unload. */
-	void *module_core;
+	void *module_core_rx, *module_core_rw;
 
 	/* Here are the sizes of the init and core sections */
-	unsigned int init_size, core_size;
+	unsigned int init_size_rw, core_size_rw;
 
 	/* The size of the executable code in each section.  */
-	unsigned int init_text_size, core_text_size;
+	unsigned int init_size_rx, core_size_rx;
 
 #ifdef CONFIG_MODULES_TREE_LOOKUP
 	/*
@@ -397,12 +401,11 @@ struct module {
 	 * above entries such that a regular lookup will only touch one
 	 * cacheline.
 	 */
-	struct mod_tree_node	mtn_core;
-	struct mod_tree_node	mtn_init;
+	struct mod_tree_node	mtn_core_rw;
+	struct mod_tree_node	mtn_core_rx;
+	struct mod_tree_node	mtn_init_rw;
+	struct mod_tree_node	mtn_init_rx;
 #endif
-
-	/* Size of RO sections of the module (text+rodata) */
-	unsigned int init_ro_size, core_ro_size;
 
 	/* Arch-specific module values */
 	struct mod_arch_specific arch;
@@ -455,6 +458,10 @@ struct module {
 	unsigned int num_trace_events;
 	struct trace_enum_map **trace_enums;
 	unsigned int num_trace_enums;
+	struct file_operations trace_id;
+	struct file_operations trace_enable;
+	struct file_operations trace_format;
+	struct file_operations trace_filter;
 #endif
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
 	unsigned int num_ftrace_callsites;
@@ -482,7 +489,20 @@ struct module {
 	ctor_fn_t *ctors;
 	unsigned int num_ctors;
 #endif
-} ____cacheline_aligned;
+
+#ifdef CONFIG_PAX_REFCOUNT
+	char *refcount_overflow_start;
+	char *refcount64_overflow_start;
+	char *refcount_underflow_start;
+	char *refcount64_underflow_start;
+	unsigned int refcount_overflow_size;
+	unsigned int refcount64_overflow_size;
+	unsigned int refcount_underflow_size;
+	unsigned int refcount64_underflow_size;
+#endif
+
+} ____cacheline_aligned __randomize_layout;
+
 #ifndef MODULE_ARCH_INIT
 #define MODULE_ARCH_INIT {}
 #endif
@@ -503,18 +523,48 @@ bool is_module_address(unsigned long addr);
 bool is_module_percpu_address(unsigned long addr);
 bool is_module_text_address(unsigned long addr);
 
+static inline int within_module_range(unsigned long addr, void *start, unsigned long size)
+{
+
+#ifdef CONFIG_PAX_KERNEXEC
+	if (ktla_ktva(addr) >= (unsigned long)start &&
+	    ktla_ktva(addr) < (unsigned long)start + size)
+		return 1;
+#endif
+
+	return ((void *)addr >= start && (void *)addr < start + size);
+}
+
+static inline int within_module_core_rx(unsigned long addr, const struct module *mod)
+{
+	return within_module_range(addr, mod->module_core_rx, mod->core_size_rx);
+}
+
+static inline int within_module_core_rw(unsigned long addr, const struct module *mod)
+{
+	return within_module_range(addr, mod->module_core_rw, mod->core_size_rw);
+}
+
+static inline int within_module_init_rx(unsigned long addr, const struct module *mod)
+{
+	return within_module_range(addr, mod->module_init_rx, mod->init_size_rx);
+}
+
+static inline int within_module_init_rw(unsigned long addr, const struct module *mod)
+{
+	return within_module_range(addr, mod->module_init_rw, mod->init_size_rw);
+}
+
 static inline bool within_module_core(unsigned long addr,
 				      const struct module *mod)
 {
-	return (unsigned long)mod->module_core <= addr &&
-	       addr < (unsigned long)mod->module_core + mod->core_size;
+	return within_module_core_rx(addr, mod) || within_module_core_rw(addr, mod);
 }
 
 static inline bool within_module_init(unsigned long addr,
 				      const struct module *mod)
 {
-	return (unsigned long)mod->module_init <= addr &&
-	       addr < (unsigned long)mod->module_init + mod->init_size;
+	return within_module_init_rx(addr, mod) || within_module_init_rw(addr, mod);
 }
 
 static inline bool within_module(unsigned long addr, const struct module *mod)

@@ -16,6 +16,17 @@
 #define __read_mostly
 #endif
 
+#ifdef CONFIG_PAX_KERNEXEC
+# ifndef __read_only
+# error KERNEXEC requires __read_only
+# endif
+#else
+# ifdef __read_only
+# undef __read_only
+# endif
+# define __read_only __read_mostly
+#endif
+
 #ifndef ____cacheline_aligned
 #define ____cacheline_aligned __attribute__((__aligned__(SMP_CACHE_BYTES)))
 #endif

@@ -62,7 +62,7 @@ static u32 HASH(const struct in6_addr *addr1, const struct in6_addr *addr2)
 
 static int vti6_dev_init(struct net_device *dev);
 static void vti6_dev_setup(struct net_device *dev);
-static struct rtnl_link_ops vti6_link_ops __read_mostly;
+static struct rtnl_link_ops vti6_link_ops;
 
 static int vti6_net_id __read_mostly;
 struct vti6_net {
@@ -1032,7 +1032,7 @@ static const struct nla_policy vti6_policy[IFLA_VTI_MAX + 1] = {
 	[IFLA_VTI_OKEY]		= { .type = NLA_U32 },
 };
 
-static struct rtnl_link_ops vti6_link_ops __read_mostly = {
+static struct rtnl_link_ops vti6_link_ops = {
 	.kind		= "vti6",
 	.maxtype	= IFLA_VTI_MAX,
 	.policy		= vti6_policy,

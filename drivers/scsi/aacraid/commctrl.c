@@ -720,9 +720,8 @@ static int aac_send_raw_srb(struct aac_dev* dev, void __user * arg)
 					rcode = -EINVAL;
 					goto cleanup;
 				}
-				/* Does this really need to be GFP_DMA? */
-				p = kmalloc(usg->sg[i].count,GFP_KERNEL|__GFP_DMA);
-				if(!p) {
+				p = kmalloc(usg->sg[i].count, GFP_KERNEL);
+				if (!p) {
 					dprintk((KERN_DEBUG"aacraid: Could not allocate SG buffer - size = %d buffer number %d of %d\n",
 					  usg->sg[i].count,i,usg->count));
 					rcode = -ENOMEM;

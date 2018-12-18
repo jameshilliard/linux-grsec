@@ -25,10 +25,34 @@
 
 #include "slab.h"
 
-enum slab_state slab_state;
+enum slab_state slab_state __read_only;
 LIST_HEAD(slab_caches);
 DEFINE_MUTEX(slab_mutex);
 struct kmem_cache *kmem_cache;
+
+#ifdef CONFIG_PAX_MEMORY_SANITIZE
+enum pax_sanitize_mode pax_sanitize_slab __read_only = PAX_SANITIZE_SLAB_FAST;
+static int __init pax_sanitize_slab_setup(char *str)
+{
+	if (!str)
+		return 0;
+
+	if (!strcmp(str, "0") || !strcmp(str, "off")) {
+		pr_info("PaX slab sanitization: %s\n", "disabled");
+		pax_sanitize_slab = PAX_SANITIZE_SLAB_OFF;
+	} else if (!strcmp(str, "1") || !strcmp(str, "fast")) {
+		pr_info("PaX slab sanitization: %s\n", "fast");
+		pax_sanitize_slab = PAX_SANITIZE_SLAB_FAST;
+	} else if (!strcmp(str, "full")) {
+		pr_info("PaX slab sanitization: %s\n", "full");
+		pax_sanitize_slab = PAX_SANITIZE_SLAB_FULL;
+	} else
+		pr_err("PaX slab sanitization: unsupported option '%s'\n", str);
+
+	return 0;
+}
+early_param("pax_sanitize_slab", pax_sanitize_slab_setup);
+#endif
 
 /*
  * Set of flags that will prevent slab merging
@@ -43,7 +67,7 @@ struct kmem_cache *kmem_cache;
  * Merge control. If this is set then no merging of slab caches will occur.
  * (Could be removed. This was introduced to pacify the merge skeptics.)
  */
-static int slab_nomerge;
+static int slab_nomerge __read_only = 1;
 
 static int __init setup_slab_nomerge(char *str)
 {
@@ -239,7 +263,7 @@ int slab_unmergeable(struct kmem_cache *s)
 	/*
 	 * We may have set a slab to be unmergeable during bootstrap.
 	 */
-	if (s->refcount < 0)
+	if (atomic_read(&s->refcount) < 0)
 		return 1;
 
 	return 0;
@@ -321,11 +345,14 @@ unsigned long calculate_alignment(unsigned long flags,
 
 static struct kmem_cache *create_cache(const char *name,
 		size_t object_size, size_t size, size_t align,
-		unsigned long flags, void (*ctor)(void *),
+		unsigned long flags, size_t useroffset,
+		size_t usersize, void (*ctor)(void *),
 		struct mem_cgroup *memcg, struct kmem_cache *root_cache)
 {
 	struct kmem_cache *s;
 	int err;
+
+	BUG_ON(useroffset + usersize > object_size);
 
 	err = -ENOMEM;
 	s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
@@ -337,6 +364,8 @@ static struct kmem_cache *create_cache(const char *name,
 	s->size = size;
 	s->align = align;
 	s->ctor = ctor;
+	s->useroffset = useroffset;
+	s->usersize = usersize;
 
 	err = init_memcg_params(s, memcg, root_cache);
 	if (err)
@@ -346,7 +375,7 @@ static struct kmem_cache *create_cache(const char *name,
 	if (err)
 		goto out_free_cache;
 
-	s->refcount = 1;
+	atomic_set(&s->refcount, 1);
 	list_add(&s->list, &slab_caches);
 out:
 	if (err)
@@ -360,11 +389,13 @@ out_free_cache:
 }
 
 /*
- * kmem_cache_create - Create a cache.
+ * __kmem_cache_create_usercopy - Create a cache.
  * @name: A string which is used in /proc/slabinfo to identify this cache.
  * @size: The size of objects to be created in this cache.
  * @align: The required alignment for the objects.
  * @flags: SLAB flags
+ * @useroffset: USERCOPY region offset
+ * @usersize: USERCOPY region size
  * @ctor: A constructor for the objects.
  *
  * Returns a ptr to the cache on success, NULL on failure.
@@ -383,9 +414,10 @@ out_free_cache:
  * cacheline.  This can be beneficial if you're counting cycles as closely
  * as davem.
  */
-struct kmem_cache *
-kmem_cache_create(const char *name, size_t size, size_t align,
-		  unsigned long flags, void (*ctor)(void *))
+static struct kmem_cache *
+__kmem_cache_create_usercopy(const char *name, size_t size, size_t align,
+		  unsigned long flags, size_t useroffset, size_t usersize,
+		  void (*ctor)(void *))
 {
 	struct kmem_cache *s = NULL;
 	const char *cache_name;
@@ -410,7 +442,10 @@ kmem_cache_create(const char *name, size_t size, size_t align,
 	 */
 	flags &= CACHE_CREATE_MASK;
 
-	s = __kmem_cache_alias(name, size, align, flags, ctor);
+	BUG_ON(!usersize && useroffset);
+	BUG_ON(size < usersize || size - usersize < useroffset);
+	if (!usersize)
+		s = __kmem_cache_alias(name, size, align, flags, ctor);
 	if (s)
 		goto out_unlock;
 
@@ -422,7 +457,7 @@ kmem_cache_create(const char *name, size_t size, size_t align,
 
 	s = create_cache(cache_name, size, size,
 			 calculate_alignment(flags, align, size),
-			 flags, ctor, NULL, NULL);
+			 flags, useroffset, usersize, ctor, NULL, NULL);
 	if (IS_ERR(s)) {
 		err = PTR_ERR(s);
 		kfree_const(cache_name);
@@ -448,7 +483,23 @@ out_unlock:
 	}
 	return s;
 }
+
+struct kmem_cache *
+kmem_cache_create(const char *name, size_t size, size_t align,
+		  unsigned long flags, void (*ctor)(void *))
+{
+	return __kmem_cache_create_usercopy(name, size, align, flags, 0, 0, ctor);
+}
 EXPORT_SYMBOL(kmem_cache_create);
+
+struct kmem_cache *
+kmem_cache_create_usercopy(const char *name, size_t size, size_t align,
+		  unsigned long flags, size_t useroffset, size_t usersize,
+		  void (*ctor)(void *))
+{
+	return __kmem_cache_create_usercopy(name, size, align, flags, useroffset, usersize, ctor);
+}
+EXPORT_SYMBOL(kmem_cache_create_usercopy);
 
 static int shutdown_cache(struct kmem_cache *s,
 		struct list_head *release, bool *need_rcu_barrier)
@@ -471,7 +522,7 @@ static void release_caches(struct list_head *release, bool need_rcu_barrier)
 		rcu_barrier();
 
 	list_for_each_entry_safe(s, s2, release, list) {
-#ifdef SLAB_SUPPORTS_SYSFS
+#if defined(SLAB_SUPPORTS_SYSFS) && !defined(CONFIG_GRKERNSEC_PROC_ADD)
 		sysfs_slab_remove(s);
 #else
 		slab_kmem_cache_release(s);
@@ -531,7 +582,8 @@ void memcg_create_kmem_cache(struct mem_cgroup *memcg,
 
 	s = create_cache(cache_name, root_cache->object_size,
 			 root_cache->size, root_cache->align,
-			 root_cache->flags, root_cache->ctor,
+			 root_cache->flags, root_cache->useroffset,
+			 root_cache->usersize, root_cache->ctor,
 			 memcg, root_cache);
 	/*
 	 * If we could not create a memcg cache, do not complain, because
@@ -714,8 +766,7 @@ void kmem_cache_destroy(struct kmem_cache *s)
 
 	mutex_lock(&slab_mutex);
 
-	s->refcount--;
-	if (s->refcount)
+	if (!atomic_dec_and_test(&s->refcount))
 		goto out_unlock;
 
 	err = shutdown_memcg_caches(s, &release, &need_rcu_barrier);
@@ -765,13 +816,15 @@ bool slab_is_available(void)
 #ifndef CONFIG_SLOB
 /* Create a cache during boot when no slab services are available yet */
 void __init create_boot_cache(struct kmem_cache *s, const char *name, size_t size,
-		unsigned long flags)
+		unsigned long flags, size_t useroffset, size_t usersize)
 {
 	int err;
 
 	s->name = name;
 	s->size = s->object_size = size;
 	s->align = calculate_alignment(flags, ARCH_KMALLOC_MINALIGN, size);
+	s->useroffset = useroffset;
+	s->usersize = usersize;
 
 	slab_init_memcg_params(s);
 
@@ -781,29 +834,40 @@ void __init create_boot_cache(struct kmem_cache *s, const char *name, size_t siz
 		panic("Creation of kmalloc slab %s size=%zu failed. Reason %d\n",
 					name, size, err);
 
-	s->refcount = -1;	/* Exempt from merging for now */
+	atomic_set(&s->refcount, -1);	/* Exempt from merging for now */
 }
 
-struct kmem_cache *__init create_kmalloc_cache(const char *name, size_t size,
-				unsigned long flags)
+struct kmem_cache *__init create_kmalloc_cache_usercopy(const char *name, size_t size,
+				unsigned long flags, size_t useroffset, size_t usersize)
 {
 	struct kmem_cache *s = kmem_cache_zalloc(kmem_cache, GFP_NOWAIT);
 
 	if (!s)
 		panic("Out of memory when creating slab %s\n", name);
 
-	create_boot_cache(s, name, size, flags);
+	create_boot_cache(s, name, size, flags, useroffset, usersize);
 	list_add(&s->list, &slab_caches);
-	s->refcount = 1;
+	atomic_set(&s->refcount, 1);
 	return s;
 }
 
-struct kmem_cache *kmalloc_caches[KMALLOC_SHIFT_HIGH + 1];
+struct kmem_cache *__init create_kmalloc_cache(const char *name, size_t size,
+				unsigned long flags)
+{
+	return create_kmalloc_cache_usercopy(name, size, flags, 0, 0);
+}
+
+struct kmem_cache *kmalloc_caches[KMALLOC_SHIFT_HIGH + 1] __read_only;
 EXPORT_SYMBOL(kmalloc_caches);
 
 #ifdef CONFIG_ZONE_DMA
-struct kmem_cache *kmalloc_dma_caches[KMALLOC_SHIFT_HIGH + 1];
+struct kmem_cache *kmalloc_dma_caches[KMALLOC_SHIFT_HIGH + 1] __read_only;
 EXPORT_SYMBOL(kmalloc_dma_caches);
+#endif
+
+#ifdef CONFIG_PAX_USERCOPY
+struct kmem_cache *kmalloc_usercopy_caches[KMALLOC_SHIFT_HIGH + 1] __read_only;
+EXPORT_SYMBOL(kmalloc_usercopy_caches);
 #endif
 
 /*
@@ -812,7 +876,7 @@ EXPORT_SYMBOL(kmalloc_dma_caches);
  * of two cache sizes there. The size of larger slabs can be determined using
  * fls.
  */
-static s8 size_index[24] = {
+static s8 size_index[24] __read_only = {
 	3,	/* 8 */
 	4,	/* 16 */
 	5,	/* 24 */
@@ -870,6 +934,13 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 		return kmalloc_dma_caches[index];
 
 #endif
+
+#ifdef CONFIG_PAX_USERCOPY
+	if (unlikely((flags & GFP_USERCOPY)))
+		return kmalloc_usercopy_caches[index];
+
+#endif
+
 	return kmalloc_caches[index];
 }
 
@@ -947,8 +1018,8 @@ void __init setup_kmalloc_cache_index_table(void)
 
 static void __init new_kmalloc_cache(int idx, unsigned long flags)
 {
-	kmalloc_caches[idx] = create_kmalloc_cache(kmalloc_info[idx].name,
-					kmalloc_info[idx].size, flags);
+	kmalloc_caches[idx] = create_kmalloc_cache_usercopy(kmalloc_info[idx].name,
+					kmalloc_info[idx].size, flags, 0, kmalloc_info[idx].size);
 }
 
 /*
@@ -993,6 +1064,23 @@ void __init create_kmalloc_caches(unsigned long flags)
 		}
 	}
 #endif
+
+#ifdef CONFIG_PAX_USERCOPY
+	for (i = 0; i <= KMALLOC_SHIFT_HIGH; i++) {
+		struct kmem_cache *s = kmalloc_caches[i];
+
+		if (s) {
+			int size = kmalloc_size(i);
+			char *n = kasprintf(GFP_NOWAIT,
+				 "usercopy-kmalloc-%d", size);
+
+			BUG_ON(!n);
+			kmalloc_usercopy_caches[i] = create_kmalloc_cache_usercopy(n,
+				size, flags, 0, size);
+		}
+	}
+#endif
+
 }
 #endif /* !CONFIG_SLOB */
 
@@ -1008,6 +1096,12 @@ void *kmalloc_order(size_t size, gfp_t flags, unsigned int order)
 
 	flags |= __GFP_COMP;
 	page = alloc_kmem_pages(flags, order);
+#ifdef CONFIG_SLOB
+	if (page) {
+		page->private = 1UL << order;
+		__SetPageSlab(page);
+	}
+#endif
 	ret = page ? page_address(page) : NULL;
 	kmemleak_alloc(ret, size, 1, flags);
 	kasan_kmalloc_large(ret, size);
@@ -1052,6 +1146,9 @@ static void print_slabinfo_header(struct seq_file *m)
 	seq_puts(m, " : globalstat <listallocs> <maxobjs> <grown> <reaped> "
 		 "<error> <maxfreeable> <nodeallocs> <remotefrees> <alienoverflow>");
 	seq_puts(m, " : cpustat <allochit> <allocmiss> <freehit> <freemiss>");
+#ifdef CONFIG_PAX_MEMORY_SANITIZE
+	seq_puts(m, " : pax <sanitized> <not_sanitized>");
+#endif
 #endif
 	seq_putc(m, '\n');
 }
@@ -1181,7 +1278,7 @@ static int __init slab_proc_init(void)
 module_init(slab_proc_init);
 #endif /* CONFIG_SLABINFO */
 
-static __always_inline void *__do_krealloc(const void *p, size_t new_size,
+static __always_inline void * __size_overflow(2) __do_krealloc(const void *p, size_t new_size,
 					   gfp_t flags)
 {
 	void *ret;

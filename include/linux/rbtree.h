@@ -45,7 +45,15 @@ struct rb_root {
 };
 
 
-#define rb_parent(r)   ((struct rb_node *)((r)->__rb_parent_color & ~3))
+static inline struct rb_node *rb_parent(const struct rb_node *r) {
+	struct rb_node *parent = (struct rb_node *)(r->__rb_parent_color & ~3);
+	BUG_ON(parent && parent->rb_left != r && parent->rb_right != r);
+	return parent;
+}
+
+static inline struct rb_node *rb_parent_unchecked(const struct rb_node *r) {
+	return (struct rb_node *)(r->__rb_parent_color & ~3);
+}
 
 #define RB_ROOT	(struct rb_root) { NULL, }
 #define	rb_entry(ptr, type, member) container_of(ptr, type, member)
@@ -65,6 +73,7 @@ extern void rb_erase(struct rb_node *, struct rb_root *);
 
 /* Find logical next and previous nodes in a tree */
 extern struct rb_node *rb_next(const struct rb_node *);
+extern struct rb_node *rb_next_unchecked(const struct rb_node *);
 extern struct rb_node *rb_prev(const struct rb_node *);
 extern struct rb_node *rb_first(const struct rb_root *);
 extern struct rb_node *rb_last(const struct rb_root *);

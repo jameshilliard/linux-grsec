@@ -103,10 +103,10 @@ ENTRY(startup_32)
 	addl	%eax, %ebx
 	notl	%eax
 	andl	%eax, %ebx
-	cmpl	$LOAD_PHYSICAL_ADDR, %ebx
+	cmpl	$____LOAD_PHYSICAL_ADDR, %ebx
 	jge	1f
 #endif
-	movl	$LOAD_PHYSICAL_ADDR, %ebx
+	movl	$____LOAD_PHYSICAL_ADDR, %ebx
 1:
 
 	/* Target address to relocate to for decompression */
@@ -331,10 +331,10 @@ preferred_addr:
 	addq	%rax, %rbp
 	notq	%rax
 	andq	%rax, %rbp
-	cmpq	$LOAD_PHYSICAL_ADDR, %rbp
+	cmpq	$____LOAD_PHYSICAL_ADDR, %rbp
 	jge	1f
 #endif
-	movq	$LOAD_PHYSICAL_ADDR, %rbp
+	movq	$____LOAD_PHYSICAL_ADDR, %rbp
 1:
 
 	/* Target address to relocate to for decompression */
@@ -443,8 +443,8 @@ gdt:
 	.long	gdt
 	.word	0
 	.quad	0x0000000000000000	/* NULL descriptor */
-	.quad	0x00af9a000000ffff	/* __KERNEL_CS */
-	.quad	0x00cf92000000ffff	/* __KERNEL_DS */
+	.quad	0x00af9b000000ffff	/* __KERNEL_CS */
+	.quad	0x00cf93000000ffff	/* __KERNEL_DS */
 	.quad	0x0080890000000000	/* TS descriptor */
 	.quad   0x0000000000000000	/* TS continued */
 gdt_end:

@@ -35,7 +35,6 @@ static ssize_t pubek_show(struct device *dev, struct device_attribute *attr,
 	ssize_t err;
 	int i, rc;
 	char *str = buf;
-
 	struct tpm_chip *chip = dev_get_drvdata(dev);
 
 	memset(&tpm_cmd, 0, sizeof(tpm_cmd));

@@ -140,7 +140,7 @@
  */
 
 /* returns the page unlocked, but with a reference */
-static int ll_dir_filler(void *_hash, struct page *page0)
+static int ll_dir_filler(struct file *_hash, struct page *page0)
 {
 	struct inode *inode = page0->mapping->host;
 	int hash64 = ll_i2sbi(inode)->ll_flags & LL_SBI_64BIT_HASH;
@@ -1383,6 +1383,8 @@ lmv_out_free:
 		if (lumv1->lmm_magic == LOV_USER_MAGIC_V3) {
 			if (copy_from_user(&lumv3, lumv3p, sizeof(lumv3)))
 				return -EFAULT;
+			if (lumv3.lmm_magic != LOV_USER_MAGIC_V3)
+				return -EINVAL;
 		}
 
 		if (is_root_inode(inode))

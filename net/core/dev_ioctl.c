@@ -262,6 +262,8 @@ static int dev_ifsioc(struct net *net, struct ifreq *ifr, unsigned int cmd)
 		return dev_set_mtu(dev, ifr->ifr_mtu);
 
 	case SIOCSIFHWADDR:
+		if (dev->addr_len > sizeof(struct sockaddr))
+			return -EINVAL;
 		return dev_set_mac_address(dev, &ifr->ifr_hwaddr);
 
 	case SIOCSIFHWBROADCAST:
@@ -369,8 +371,13 @@ void dev_load(struct net *net, const char *name)
 	no_module = !dev;
 	if (no_module && capable(CAP_NET_ADMIN))
 		no_module = request_module("netdev-%s", name);
-	if (no_module && capable(CAP_SYS_MODULE))
+	if (no_module && capable(CAP_SYS_MODULE)) {
+#ifdef CONFIG_GRKERNSEC_MODHARDEN
+		___request_module(true, "grsec_modharden_netdev", "%s", name);
+#else
 		request_module("%s", name);
+#endif
+	}
 }
 EXPORT_SYMBOL(dev_load);
 
@@ -410,6 +417,24 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 	}
 	if (cmd == SIOCGIFNAME)
 		return dev_ifname(net, (struct ifreq __user *)arg);
+
+	/*
+	 * Take care of Wireless Extensions. Unfortunately struct iwreq
+	 * isn't a proper subset of struct ifreq (it's 8 byte shorter)
+	 * so we need to treat it specially, otherwise applications may
+	 * fault if the struct they're passing happens to land at the
+	 * end of a mapped page.
+	 */
+	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
+		struct iwreq iwr;
+
+		if (copy_from_user(&iwr, arg, sizeof(iwr)))
+			return -EFAULT;
+
+		iwr.ifr_name[sizeof(iwr.ifr_name) - 1] = 0;
+
+		return wext_handle_ioctl(net, &iwr, cmd, arg);
+	}
 
 	if (copy_from_user(&ifr, arg, sizeof(struct ifreq)))
 		return -EFAULT;
@@ -560,9 +585,6 @@ int dev_ioctl(struct net *net, unsigned int cmd, void __user *arg)
 				ret = -EFAULT;
 			return ret;
 		}
-		/* Take care of Wireless Extensions */
-		if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST)
-			return wext_handle_ioctl(net, &ifr, cmd, arg);
 		return -ENOTTY;
 	}
 }

@@ -76,6 +76,7 @@
 .text
 ENTRY(crc_pcl)
 #define    bufp		%rdi
+#define    _bufp	rdi
 #define    bufp_dw	%edi
 #define    bufp_w	%di
 #define    bufp_b	%dil
@@ -173,7 +174,7 @@ continue_block:
 	movzxw  (bufp, %rax, 2), len
 	offset=crc_array-jump_table
 	lea     offset(bufp, len, 1), bufp
-	JMP_NOSPEC bufp
+	JMP_NOSPEC _bufp
 
 	################################################################
 	## 2a) PROCESS FULL BLOCKS:
@@ -310,6 +311,7 @@ do_return:
 	popq    %rsi
 	popq    %rdi
 	popq    %rbx
+	pax_force_retaddr
         ret
 
         ################################################################

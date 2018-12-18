@@ -1507,9 +1507,9 @@ read_controlvm_event(struct controlvm_message *msg)
 static int
 parahotplug_next_id(void)
 {
-	static atomic_t id = ATOMIC_INIT(0);
+	static atomic_unchecked_t id = ATOMIC_INIT(0);
 
-	return atomic_inc_return(&id);
+	return atomic_inc_return_unchecked(&id);
 }
 
 /*
@@ -2401,7 +2401,7 @@ static __init uint32_t visorutil_spar_detect(void)
 	}
 }
 
-static int init_unisys(void)
+static __init int init_unisys(void)
 {
 	int result;
 
@@ -2416,7 +2416,7 @@ static int init_unisys(void)
 	return 0;
 };
 
-static void exit_unisys(void)
+static __exit void exit_unisys(void)
 {
 	acpi_bus_unregister_driver(&unisys_acpi_driver);
 }

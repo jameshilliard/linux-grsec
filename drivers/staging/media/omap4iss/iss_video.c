@@ -445,9 +445,9 @@ struct iss_buffer *omap4iss_video_buffer_next(struct iss_video *video)
 	 */
 	if (video == pipe->output && !pipe->do_propagation)
 		buf->vb.sequence =
-			atomic_inc_return(&pipe->frame_number);
+			atomic_inc_return_unchecked(&pipe->frame_number);
 	else
-		buf->vb.sequence = atomic_read(&pipe->frame_number);
+		buf->vb.sequence = atomic_read_unchecked(&pipe->frame_number);
 
 	vb2_buffer_done(&buf->vb.vb2_buf, pipe->error ?
 			VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
@@ -831,7 +831,7 @@ iss_video_streamon(struct file *file, void *fh, enum v4l2_buf_type type)
 	video->queue = &vfh->queue;
 	INIT_LIST_HEAD(&video->dmaqueue);
 	video->error = false;
-	atomic_set(&pipe->frame_number, -1);
+	atomic_set_unchecked(&pipe->frame_number, -1);
 
 	ret = vb2_streamon(&vfh->queue, type);
 	if (ret < 0)

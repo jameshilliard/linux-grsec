@@ -1992,7 +1992,8 @@ int hfi1_register_ib_device(struct hfi1_devdata *dd)
 	 */
 	if (!ib_hfi1_sys_image_guid)
 		ib_hfi1_sys_image_guid = cpu_to_be64(ppd->guid);
-	lcpysz = strlcpy(ibdev->name, class_name(), lcpysz);
+	strlcpy(ibdev->name, class_name(), lcpysz);
+	lcpysz = strlen(ibdev->name);
 	strlcpy(ibdev->name + lcpysz, "_%d", IB_DEVICE_NAME_MAX - lcpysz);
 	ibdev->owner = THIS_MODULE;
 	ibdev->node_guid = cpu_to_be64(ppd->guid);

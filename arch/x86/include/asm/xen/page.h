@@ -7,7 +7,7 @@
 #include <linux/pfn.h>
 #include <linux/mm.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 
@@ -64,12 +64,20 @@ extern int clear_foreign_p2m_mapping(struct gnttab_unmap_grant_ref *unmap_ops,
  */
 static inline int xen_safe_write_ulong(unsigned long *addr, unsigned long val)
 {
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	return __probe_kernel_write(addr, &val, sizeof val);
+#else
 	return __put_user(val, (unsigned long __user *)addr);
+#endif
 }
 
 static inline int xen_safe_read_ulong(unsigned long *addr, unsigned long *val)
 {
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	return __probe_kernel_read(val, addr, sizeof val);
+#else
 	return __get_user(*val, (unsigned long __user *)addr);
+#endif
 }
 
 /*
@@ -82,7 +90,7 @@ static inline int xen_safe_read_ulong(unsigned long *addr, unsigned long *val)
  * - get_phys_to_machine() is to be called by __pfn_to_mfn() only in special
  *   cases needing an extended handling.
  */
-static inline unsigned long __pfn_to_mfn(unsigned long pfn)
+static inline unsigned long __intentional_overflow(-1) __pfn_to_mfn(unsigned long pfn)
 {
 	unsigned long mfn;
 

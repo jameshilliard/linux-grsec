@@ -690,7 +690,7 @@ static void csi2_isr_ctx(struct iss_csi2_device *csi2,
 			 * by the source. Increment the frame number in software
 			 * in that case.
 			 */
-			atomic_inc(&pipe->frame_number);
+			atomic_inc_unchecked(&pipe->frame_number);
 		} else {
 			/* Extend the 16 bit frame number to 32 bits by
 			 * computing the delta between two consecutive CSI2
@@ -704,7 +704,7 @@ static void csi2_isr_ctx(struct iss_csi2_device *csi2,
 				delta--;
 			ctx->frame = frame;
 
-			atomic_add(delta, &pipe->frame_number);
+			atomic_add_unchecked(delta, &pipe->frame_number);
 		}
 	}
 

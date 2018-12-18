@@ -94,6 +94,7 @@ struct user_struct root_user = {
 	.sigpending	= ATOMIC_INIT(0),
 	.locked_shm     = 0,
 	.uid		= GLOBAL_ROOT_UID,
+	.ratelimit	= RATELIMIT_STATE_INIT(root_user.ratelimit, 0, 0),
 };
 
 /*
@@ -127,8 +128,8 @@ static struct user_struct *uid_hash_find(kuid_t uid, struct hlist_head *hashent)
  * IRQ state (as stored in flags) is restored and uidhash_lock released
  * upon function exit.
  */
+static void free_user(struct user_struct *up, unsigned long flags) __releases(&uidhash_lock);
 static void free_user(struct user_struct *up, unsigned long flags)
-	__releases(&uidhash_lock)
 {
 	uid_hash_remove(up);
 	spin_unlock_irqrestore(&uidhash_lock, flags);
@@ -184,6 +185,8 @@ struct user_struct *alloc_uid(kuid_t uid)
 
 		new->uid = uid;
 		atomic_set(&new->__count, 1);
+		ratelimit_state_init(&new->ratelimit, HZ, 100);
+		ratelimit_set_flags(&new->ratelimit, RATELIMIT_MSG_ON_RELEASE);
 
 		/*
 		 * Before adding this, check whether we raced

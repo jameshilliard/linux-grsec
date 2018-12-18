@@ -130,7 +130,7 @@ do {									\
 	 */
 #define __retpoline_fill_return_buffer					\
 	ALTERNATIVE("jmp 910f",						\
-		__stringify(__FILL_RETURN_BUFFER(%%r12, RSB_CLEAR_LOOPS, %%rsp)),\
+		__stringify(__FILL_RETURN_BUFFER(%%r13, RSB_CLEAR_LOOPS, %%rsp)),\
 		X86_FEATURE_RSB_CTXSW)					\
 	"910:\n\t"
 #else
@@ -150,7 +150,7 @@ do {									\
 	     "movq "__percpu_arg([current_task])",%%rsi\n\t"		  \
 	     __switch_canary						  \
 	     __retpoline_fill_return_buffer				  \
-	     "movq %P[thread_info](%%rsi),%%r8\n\t"			  \
+	     "movq "__percpu_arg([thread_info])",%%r8\n\t"		  \
 	     "movq %%rax,%%rdi\n\t" 					  \
 	     "testl  %[_tif_fork],%P[ti_flags](%%r8)\n\t"		  \
 	     "jnz   ret_from_fork\n\t"					  \
@@ -161,11 +161,29 @@ do {									\
 	       [threadrsp] "i" (offsetof(struct task_struct, thread.sp)), \
 	       [ti_flags] "i" (offsetof(struct thread_info, flags)),	  \
 	       [_tif_fork] "i" (_TIF_FORK),			  	  \
-	       [thread_info] "i" (offsetof(struct task_struct, stack)),   \
+	       [thread_info] "m" (current_tinfo),			  \
 	       [current_task] "m" (current_task)			  \
 	       __switch_canary_iparam					  \
 	     : "memory", "cc" __EXTRA_CLOBBER)
 
 #endif /* CONFIG_X86_32 */
+
+static inline void update_sp0(struct tss_struct *tss, struct task_struct *task)
+{
+	/* On x86_64, sp0 always points to the entry trampoline stack, which is constant: */
+#ifdef CONFIG_X86_32
+	load_sp0(tss, &task->thread);
+#else
+	if (static_cpu_has(X86_FEATURE_XENPV))
+		load_sp0(tss, &task->thread);
+#endif
+}
+
+static inline void update_sp1(struct tss_struct *tss, unsigned long sp1)
+{
+#ifdef CONFIG_X86_64
+	tss->x86_tss.sp1 = sp1;
+#endif
+}
 
 #endif /* _ASM_X86_SWITCH_TO_H */

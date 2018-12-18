@@ -745,6 +745,7 @@ static int xgene_enet_phy_connect(struct net_device *ndev)
 
 		phy_dev = of_phy_connect(ndev, phy_np, &xgene_enet_adjust_link,
 					 0, pdata->phy_mode);
+		of_node_put(phy_np);
 		if (!phy_dev) {
 			netdev_err(ndev, "Could not connect to PHY\n");
 			return -ENODEV;

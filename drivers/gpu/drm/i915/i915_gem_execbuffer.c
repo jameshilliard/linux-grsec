@@ -513,9 +513,7 @@ i915_gem_execbuffer_relocate_vma(struct i915_vma *vma,
 				return ret;
 
 			if (r->presumed_offset != offset &&
-			    __copy_to_user_inatomic(&user_relocs->presumed_offset,
-						    &r->presumed_offset,
-						    sizeof(r->presumed_offset))) {
+			    __put_user(r->presumed_offset, &user_relocs->presumed_offset)) {
 				return -EFAULT;
 			}
 
@@ -965,12 +963,12 @@ i915_gem_check_execbuffer(struct drm_i915_gem_execbuffer2 *exec)
 static int
 validate_exec_list(struct drm_device *dev,
 		   struct drm_i915_gem_exec_object2 *exec,
-		   int count)
+		   unsigned int count)
 {
 	unsigned relocs_total = 0;
 	unsigned relocs_max = UINT_MAX / sizeof(struct drm_i915_gem_relocation_entry);
 	unsigned invalid_flags;
-	int i;
+	unsigned int i;
 
 	invalid_flags = __EXEC_OBJECT_UNKNOWN_FLAGS;
 	if (USES_FULL_PPGTT(dev))

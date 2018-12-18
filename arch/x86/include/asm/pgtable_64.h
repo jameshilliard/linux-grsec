@@ -14,13 +14,34 @@
 #include <linux/bitops.h>
 #include <linux/threads.h>
 
+extern pud_t level3_ident_pgt[4][512];
+extern pud_t level3_vmalloc_start_pgt[4][512];
+extern pud_t level3_vmalloc_end_pgt[512];
+extern pud_t level3_vmemmap_pgt[512];
+extern pud_t level3_cpu_entry_area_pgt[512];
 extern pud_t level3_kernel_pgt[512];
-extern pud_t level3_ident_pgt[512];
+extern pud_t level2_vmemmap_pgt[512];
 extern pmd_t level2_kernel_pgt[512];
 extern pmd_t level2_fixmap_pgt[512];
+#ifdef CONFIG_XEN
 extern pmd_t level2_ident_pgt[512];
-extern pte_t level1_fixmap_pgt[512];
-extern pgd_t init_level4_pgt[];
+#else
+extern pmd_t level2_ident_pgt[2][512];
+#endif
+extern pte_t level1_ident_pgt[512];
+extern pte_t level1_modules_pgt[4][512];
+extern pte_t level1_fixmap_pgt[3][512];
+extern pte_t level1_vsyscall_pgt[512];
+extern pud_t level3_shadow_kernel_pgt[512];
+extern pmd_t level2_shadow_kernel_pgt[512];
+extern pte_t level1_shadow_kernel_pgt[512];
+#ifdef CONFIG_PAX_PER_CPU_PGD
+extern pgd_t init_level4_pgt[4*512];
+#elif defined(CONFIG_PAGE_TABLE_ISOLATION)
+extern pgd_t init_level4_pgt[2*512];
+#else
+extern pgd_t init_level4_pgt[512];
+#endif
 
 #define swapper_pg_dir init_level4_pgt
 
@@ -43,16 +64,15 @@ struct mm_struct;
 
 void set_pte_vaddr_pud(pud_t *pud_page, unsigned long vaddr, pte_t new_pte);
 
+static inline void native_set_pte(pte_t *ptep, pte_t pte)
+{
+	WRITE_ONCE(*ptep, pte);
+}
 
 static inline void native_pte_clear(struct mm_struct *mm, unsigned long addr,
 				    pte_t *ptep)
 {
-	*ptep = native_make_pte(0);
-}
-
-static inline void native_set_pte(pte_t *ptep, pte_t pte)
-{
-	*ptep = pte;
+	native_set_pte(ptep, native_make_pte(0));
 }
 
 static inline void native_set_pte_atomic(pte_t *ptep, pte_t pte)
@@ -62,7 +82,9 @@ static inline void native_set_pte_atomic(pte_t *ptep, pte_t pte)
 
 static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
-	*pmdp = pmd;
+	pax_open_kernel();
+	WRITE_ONCE(*pmdp, pmd);
+	pax_close_kernel();
 }
 
 static inline void native_pmd_clear(pmd_t *pmd)
@@ -98,7 +120,9 @@ static inline pmd_t native_pmdp_get_and_clear(pmd_t *xp)
 
 static inline void native_set_pud(pud_t *pudp, pud_t pud)
 {
-	*pudp = pud;
+	pax_open_kernel();
+	WRITE_ONCE(*pudp, pud);
+	pax_close_kernel();
 }
 
 static inline void native_pud_clear(pud_t *pud)
@@ -131,7 +155,9 @@ static inline pgd_t *native_get_shadow_pgd(pgd_t *pgdp)
 
 static inline void native_set_pgd(pgd_t *pgdp, pgd_t pgd)
 {
-	*pgdp = kaiser_set_shadow_pgd(pgdp, pgd);
+	pax_open_kernel();
+	WRITE_ONCE(*pgdp, kaiser_set_shadow_pgd(pgdp, pgd));
+	pax_close_kernel();
 }
 
 static inline void native_pgd_clear(pgd_t *pgd)

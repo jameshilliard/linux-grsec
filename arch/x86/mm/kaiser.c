@@ -19,6 +19,7 @@
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/desc.h>
+#include <asm/sections.h>
 #include <asm/cmdline.h>
 #include <asm/vsyscall.h>
 
@@ -181,7 +182,7 @@ static pte_t *kaiser_pagetable_walk(unsigned long address, bool user)
 }
 
 static int kaiser_add_user_map(const void *__start_addr, unsigned long size,
-			       unsigned long flags)
+			       u64 flags)
 {
 	int ret = 0;
 	pte_t *pte;
@@ -345,7 +346,7 @@ void __init kaiser_init(void)
 	if (vsyscall_enabled())
 		kaiser_add_user_map_early((void *)VSYSCALL_ADDR,
 					  PAGE_SIZE,
-					  vsyscall_pgprot);
+					  __PAGE_KERNEL_VVAR);
 
 	for_each_possible_cpu(cpu) {
 		void *percpu_vaddr = __per_cpu_user_mapped_start +
@@ -354,6 +355,38 @@ void __init kaiser_init(void)
 					  __per_cpu_user_mapped_start;
 		kaiser_add_user_map_early(percpu_vaddr, percpu_sz,
 					  __PAGE_KERNEL);
+
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->gdt,
+					  sizeof(get_cpu_entry_area(cpu)->gdt),
+					  __PAGE_KERNEL_RO);
+
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->entry_stack_page,
+					  sizeof(get_cpu_entry_area(cpu)->entry_stack_page),
+					  __PAGE_KERNEL);
+
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->tss,
+					  sizeof(struct tss_struct),
+					  __PAGE_KERNEL_RO);
+
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->entry_trampoline,
+					  sizeof(get_cpu_entry_area(cpu)->entry_trampoline),
+					  __PAGE_KERNEL_EXEC);
+
+#ifdef CONFIG_X86_64
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->exception_stacks,
+					  sizeof(get_cpu_entry_area(cpu)->exception_stacks),
+					  __PAGE_KERNEL);
+#endif
+
+#ifdef CONFIG_CPU_SUP_INTEL
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->cpu_debug_store,
+					  sizeof(struct debug_store),
+					  __PAGE_KERNEL);
+
+		kaiser_add_user_map_early(&get_cpu_entry_area(cpu)->cpu_debug_buffers,
+					  sizeof(struct debug_store_buffers),
+					  __PAGE_KERNEL);
+#endif
 	}
 
 	/*
@@ -389,7 +422,7 @@ void __init kaiser_init(void)
 }
 
 /* Add a mapping to the shadow mapping, and synchronize the mappings */
-int kaiser_add_mapping(unsigned long addr, unsigned long size, unsigned long flags)
+int kaiser_add_mapping(unsigned long addr, unsigned long size, u64 flags)
 {
 	if (!kaiser_enabled)
 		return 0;

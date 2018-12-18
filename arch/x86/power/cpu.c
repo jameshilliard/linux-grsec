@@ -70,7 +70,7 @@ static void __save_processor_state(struct saved_context *ctxt)
 	 * 'pmode_gdt' in wakeup_start.
 	 */
 	ctxt->gdt_desc.size = GDT_SIZE - 1;
-	ctxt->gdt_desc.address = (unsigned long)get_cpu_gdt_table(smp_processor_id());
+	ctxt->gdt_desc.address = (unsigned long)get_cpu_gdt_table_ro(smp_processor_id());
 
 	store_tr(ctxt->tr);
 
@@ -134,10 +134,11 @@ static void do_fpu_end(void)
 static void fix_processor_context(void)
 {
 	int cpu = smp_processor_id();
-	struct tss_struct *t = &per_cpu(cpu_tss, cpu);
+	struct tss_struct *t;
 #ifdef CONFIG_X86_64
-	struct desc_struct *desc = get_cpu_gdt_table(cpu);
-	tss_desc tss;
+	t = &get_cpu_entry_area(cpu)->tss;
+#else
+	t = cpu_tss + cpu;
 #endif
 	set_tss_desc(cpu, t);	/*
 				 * This just modifies memory; should not be
@@ -147,10 +148,6 @@ static void fix_processor_context(void)
 				 */
 
 #ifdef CONFIG_X86_64
-	memcpy(&tss, &desc[GDT_ENTRY_TSS], sizeof(tss_desc));
-	tss.type = 0x9; /* The available 64-bit TSS (see AMD vol 2, pg 91 */
-	write_gdt_entry(desc, GDT_ENTRY_TSS, &tss, DESC_TSS);
-
 	syscall_init();				/* This sets MSR_*STAR and related */
 #endif
 	load_TR_desc();				/* This does ltr */

@@ -2793,6 +2793,7 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 	if (err) {
 		mlx4_err(dev, "Failed to create file for port %d\n", port);
 		info->port = -1;
+		return err;
 	}
 
 	sprintf(info->dev_mtu_name, "mlx4_port%d_mtu", port);
@@ -2813,9 +2814,10 @@ static int mlx4_init_port_info(struct mlx4_dev *dev, int port)
 		device_remove_file(&info->dev->persist->pdev->dev,
 				   &info->port_attr);
 		info->port = -1;
+		return err;
 	}
 
-	return err;
+	return 0;
 }
 
 static void mlx4_cleanup_port_info(struct mlx4_port_info *info)
@@ -3831,7 +3833,7 @@ static const struct pci_device_id mlx4_pci_table[] = {
 MODULE_DEVICE_TABLE(pci, mlx4_pci_table);
 
 static pci_ers_result_t mlx4_pci_err_detected(struct pci_dev *pdev,
-					      pci_channel_state_t state)
+					      enum pci_channel_state state)
 {
 	struct mlx4_dev_persistent *persist = pci_get_drvdata(pdev);
 

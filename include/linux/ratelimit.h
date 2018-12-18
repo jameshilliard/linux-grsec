@@ -7,6 +7,9 @@
 #define DEFAULT_RATELIMIT_INTERVAL	(5 * HZ)
 #define DEFAULT_RATELIMIT_BURST		10
 
+/* issue num suppressed message on exit */
+#define RATELIMIT_MSG_ON_RELEASE	BIT(0)
+
 struct ratelimit_state {
 	raw_spinlock_t	lock;		/* protect the state */
 
@@ -15,6 +18,7 @@ struct ratelimit_state {
 	int		printed;
 	int		missed;
 	unsigned long	begin;
+	unsigned long	flags;
 };
 
 #define RATELIMIT_STATE_INIT(name, interval_init, burst_init) {		\
@@ -34,17 +38,31 @@ struct ratelimit_state {
 static inline void ratelimit_state_init(struct ratelimit_state *rs,
 					int interval, int burst)
 {
+	memset(rs, 0, sizeof(*rs));
+
 	raw_spin_lock_init(&rs->lock);
-	rs->interval = interval;
-	rs->burst = burst;
-	rs->printed = 0;
-	rs->missed = 0;
-	rs->begin = 0;
+	rs->interval	= interval;
+	rs->burst	= burst;
+}
+
+static inline void ratelimit_default_init(struct ratelimit_state *rs)
+{
+	return ratelimit_state_init(rs, DEFAULT_RATELIMIT_INTERVAL,
+					DEFAULT_RATELIMIT_BURST);
+}
+
+void ratelimit_state_exit(struct ratelimit_state *rs);
+
+static inline void
+ratelimit_set_flags(struct ratelimit_state *rs, unsigned long flags)
+{
+	rs->flags = flags;
 }
 
 extern struct ratelimit_state printk_ratelimit_state;
 
-extern int ___ratelimit(struct ratelimit_state *rs, const char *func);
+extern __nocapture(2)
+int ___ratelimit(struct ratelimit_state *rs, const char *func);
 #define __ratelimit(state) ___ratelimit(state, __func__)
 
 #ifdef CONFIG_PRINTK

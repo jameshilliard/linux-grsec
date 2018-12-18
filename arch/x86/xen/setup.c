@@ -11,6 +11,7 @@
 #include <linux/memblock.h>
 #include <linux/cpuidle.h>
 #include <linux/cpufreq.h>
+#include <linux/irq.h>
 
 #include <asm/elf.h>
 #include <asm/vdso.h>
@@ -957,7 +958,7 @@ static void __init fiddle_vdso(void)
 #ifdef CONFIG_X86_32
 	u32 *mask = vdso_image_32.data +
 		vdso_image_32.sym_VDSO32_NOTE_MASK;
-	*mask |= 1 << VDSO_NOTE_NONEGSEG_BIT;
+	*mask |= 1 << VDSO_NOTE_NOSEGNEG_BIT;
 #endif
 }
 

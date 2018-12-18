@@ -1184,12 +1184,33 @@ static int ext2_has_free_blocks(struct ext2_sb_info *sbi)
 
 	free_blocks = percpu_counter_read_positive(&sbi->s_freeblocks_counter);
 	root_blocks = le32_to_cpu(sbi->s_es->s_r_blocks_count);
-	if (free_blocks < root_blocks + 1 && !capable(CAP_SYS_RESOURCE) &&
+	if (free_blocks < root_blocks + 1 &&
 		!uid_eq(sbi->s_resuid, current_fsuid()) &&
 		(gid_eq(sbi->s_resgid, GLOBAL_ROOT_GID) ||
-		 !in_group_p (sbi->s_resgid))) {
+		 !in_group_p (sbi->s_resgid)) && !capable_nolog(CAP_SYS_RESOURCE)) {
 		return 0;
 	}
+	return 1;
+}
+
+/*
+ * Returns 1 if the passed-in block region is valid; 0 if some part overlaps
+ * with filesystem metadata blocksi.
+ */
+int ext2_data_block_valid(struct ext2_sb_info *sbi, ext2_fsblk_t start_blk,
+			  unsigned int count)
+{
+	if ((start_blk <= le32_to_cpu(sbi->s_es->s_first_data_block)) ||
+	    (start_blk + count < start_blk) ||
+	    (start_blk > le32_to_cpu(sbi->s_es->s_blocks_count)))
+		return 0;
+
+	/* Ensure we do not step over superblock */
+	if ((start_blk <= sbi->s_sb_block) &&
+	    (start_blk + count >= sbi->s_sb_block))
+		return 0;
+
+
 	return 1;
 }
 

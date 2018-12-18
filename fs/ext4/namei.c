@@ -3510,6 +3510,12 @@ static int ext4_rename(struct inode *old_dir, struct dentry *old_dentry,
 	int credits;
 	u8 old_file_type;
 
+	if (new.inode && new.inode->i_nlink == 0) {
+		EXT4_ERROR_INODE(new.inode,
+				 "target of rename is already freed");
+		return -EFSCORRUPTED;
+	}
+
 	if ((ext4_encrypted_inode(old_dir) &&
 	     !ext4_has_encryption_key(old_dir)) ||
 	    (ext4_encrypted_inode(new_dir) &&

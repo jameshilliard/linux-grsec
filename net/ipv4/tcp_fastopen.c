@@ -208,6 +208,8 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 		}
 	}
 	tcp_rsk(req)->rcv_nxt = tp->rcv_nxt = end_seq;
+	tp->rcv_wup = tp->rcv_nxt;
+
 	/* tcp_conn_request() is sending the SYNACK,
 	 * and queues the child into listener accept queue.
 	 */
@@ -237,9 +239,9 @@ static bool tcp_fastopen_queue_check(struct sock *sk)
 		spin_lock(&fastopenq->lock);
 		req1 = fastopenq->rskq_rst_head;
 		if (!req1 || time_after(req1->rsk_timer.expires, jiffies)) {
-			spin_unlock(&fastopenq->lock);
 			NET_INC_STATS_BH(sock_net(sk),
 					 LINUX_MIB_TCPFASTOPENLISTENOVERFLOW);
+			spin_unlock(&fastopenq->lock);
 			return false;
 		}
 		fastopenq->rskq_rst_head = req1->dl_next;
@@ -264,7 +266,7 @@ struct sock *tcp_try_fastopen(struct sock *sk, struct sk_buff *skb,
 	struct sock *child;
 
 	if (foc->len == 0) /* Client requests a cookie */
-		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPFASTOPENCOOKIEREQD);
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENCOOKIEREQD);
 
 	if (!((sysctl_tcp_fastopen & TFO_SERVER_ENABLE) &&
 	      (syn_data || foc->len >= 0) &&
@@ -293,13 +295,13 @@ fastopen:
 		child = tcp_fastopen_create_child(sk, skb, dst, req);
 		if (child) {
 			foc->len = -1;
-			NET_INC_STATS_BH(sock_net(sk),
+			NET_INC_STATS(sock_net(sk),
 					 LINUX_MIB_TCPFASTOPENPASSIVE);
 			return child;
 		}
-		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
 	} else if (foc->len > 0) /* Client presents an invalid cookie */
-		NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
+		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
 
 	valid_foc.exp = foc->exp;
 	*foc = valid_foc;

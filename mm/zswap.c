@@ -177,7 +177,7 @@ static LIST_HEAD(zswap_pools);
 /* protects zswap_pools list modification */
 static DEFINE_SPINLOCK(zswap_pools_lock);
 /* pool counter to provide unique names to zpool */
-static atomic_t zswap_pools_count = ATOMIC_INIT(0);
+static atomic_unchecked_t zswap_pools_count = ATOMIC_INIT(0);
 
 /* used by param callback function */
 static bool zswap_init_started;
@@ -586,7 +586,7 @@ static struct zswap_pool *zswap_pool_create(char *type, char *compressor)
 	}
 
 	/* unique name for each pool specifically required by zsmalloc */
-	snprintf(name, 38, "zswap%x", atomic_inc_return(&zswap_pools_count));
+	snprintf(name, 38, "zswap%x", atomic_inc_return_unchecked(&zswap_pools_count));
 
 	pool->zpool = zpool_create_pool(type, name, gfp, &zswap_zpool_ops);
 	if (!pool->zpool) {

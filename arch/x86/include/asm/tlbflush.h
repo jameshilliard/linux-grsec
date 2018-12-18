@@ -9,6 +9,21 @@
 #include <asm/special_insns.h>
 #include <asm/smp.h>
 
+/*
+ * Under PaX/UDEREF we have 3 pgds and the TLB flush protocol is based on
+ * the following uses of the address mappings and PCIDs:
+ *
+ * cfg \ pgd   | kernel                         uaccess                 user
+ * --------------------------------------------------------------------------------------------
+ * !pcpupgd    | user/kernel                    unused                  unused
+ * !uderef     | user/kernel                    unused                  unused
+ * !smap/!pcid | kernel                         user/kernel             user/kernel
+ * smap/!pcid  | user(NX)/kernel                unused                  user/kernel
+ * !smap/pcid  | kernel(KERNEL)                 user(USER)/kernel(USER) user(USER)/kernel(USER)
+ * smap/pcid   | user(NX/KERNEL)/kernel(KERNEL) unused                  user(USER)/kernel(USER)
+ *
+ */
+
 static inline void __invpcid(unsigned long pcid, unsigned long addr,
 			     unsigned long type)
 {
@@ -90,11 +105,13 @@ static inline void cr4_set_bits(unsigned long mask)
 {
 	unsigned long cr4;
 
+//	BUG_ON(!arch_irqs_disabled());
 	cr4 = this_cpu_read(cpu_tlbstate.cr4);
+	BUG_ON(cr4 != __read_cr4());
 	if ((cr4 | mask) != cr4) {
 		cr4 |= mask;
-		this_cpu_write(cpu_tlbstate.cr4, cr4);
 		__write_cr4(cr4);
+		this_cpu_write(cpu_tlbstate.cr4, __read_cr4());
 	}
 }
 
@@ -103,11 +120,13 @@ static inline void cr4_clear_bits(unsigned long mask)
 {
 	unsigned long cr4;
 
+//	BUG_ON(!arch_irqs_disabled());
 	cr4 = this_cpu_read(cpu_tlbstate.cr4);
+	BUG_ON(cr4 != __read_cr4());
 	if ((cr4 & ~mask) != cr4) {
 		cr4 &= ~mask;
-		this_cpu_write(cpu_tlbstate.cr4, cr4);
 		__write_cr4(cr4);
+		this_cpu_write(cpu_tlbstate.cr4, __read_cr4());
 	}
 }
 
@@ -124,6 +143,7 @@ static inline void cr4_toggle_bits(unsigned long mask)
 /* Read the CR4 shadow. */
 static inline unsigned long cr4_read_shadow(void)
 {
+//	BUG_ON(!arch_irqs_disabled());
 	return this_cpu_read(cpu_tlbstate.cr4);
 }
 
@@ -162,8 +182,38 @@ static inline void kaiser_flush_tlb_on_return_to_user(void)
 }
 #endif
 
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+extern bool uderef_enabled __initdata;
+#else
+#define uderef_enabled 0
+#endif
+
 static inline void __native_flush_tlb(void)
 {
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (this_cpu_has(X86_FEATURE_UDEREF)) {
+		if (this_cpu_has(X86_FEATURE_INVPCID_SINGLE)) {
+			invpcid_flush_single_context(PCID_USER);
+			if (static_cpu_has(X86_FEATURE_SMAP))
+				invpcid_flush_single_context(PCID_KERNEL);
+			return;
+		}
+
+		if (this_cpu_has(X86_FEATURE_PCID)) {
+			unsigned int cpu = raw_get_cpu();
+
+			native_write_cr3(__pa(get_cpu_pgd(cpu, uaccess)) | PCID_USER);
+			if (static_cpu_has(X86_FEATURE_SMAP))
+				native_write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL);
+			else
+				native_write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL | PCID_NOFLUSH);
+			raw_put_cpu_no_resched();
+			return;
+		}
+	}
+#endif
+
 	/*
 	 * If current->mm == NULL then we borrow a mm which may change during a
 	 * task switch and therefore we must not be preempted while we write CR3
@@ -176,32 +226,16 @@ static inline void __native_flush_tlb(void)
 	preempt_enable();
 }
 
-static inline void __native_flush_tlb_global_irq_disabled(void)
-{
-	unsigned long cr4;
-
-	cr4 = this_cpu_read(cpu_tlbstate.cr4);
-	if (cr4 & X86_CR4_PGE) {
-		/* clear PGE and flush TLB of all entries */
-		native_write_cr4(cr4 & ~X86_CR4_PGE);
-		/* restore PGE as it was before */
-		native_write_cr4(cr4);
-	} else {
-		/* do it with cr3, letting kaiser flush user PCID */
-		__native_flush_tlb();
-	}
-}
-
 static inline void __native_flush_tlb_global(void)
 {
-	unsigned long flags;
+	unsigned long cr4, flags;
 
 	if (this_cpu_has(X86_FEATURE_INVPCID)) {
 		/*
 		 * Using INVPCID is considerably faster than a pair of writes
 		 * to CR4 sandwiched inside an IRQ flag save/restore.
 		 *
-	 	 * Note, this works with CR4.PCIDE=0 or 1.
+		 * Note, this works with CR4.PCIDE=0 or 1.
 		 */
 		invpcid_flush_all();
 		return;
@@ -213,12 +247,48 @@ static inline void __native_flush_tlb_global(void)
 	 * be called from deep inside debugging code.)
 	 */
 	raw_local_irq_save(flags);
-	__native_flush_tlb_global_irq_disabled();
+
+	cr4 = this_cpu_read(cpu_tlbstate.cr4);
+	BUG_ON(cr4 != __read_cr4());
+	/* toggle PGE */
+	native_write_cr4(cr4 ^ X86_CR4_PGE);
+	/* write old PGE again and flush TLBs */
+	native_write_cr4(cr4);
+
 	raw_local_irq_restore(flags);
 }
 
 static inline void __native_flush_tlb_single(unsigned long addr)
 {
+#if 0
+	if (this_cpu_has(X86_FEATURE_INVPCID_SINGLE)) {
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (this_cpu_has(X86_FEATURE_UDEREF))
+			invpcid_flush_one(PCID_USER, addr);
+#endif
+
+		invpcid_flush_one(PCID_KERNEL, addr);
+		return;
+	}
+#endif
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (this_cpu_has(X86_FEATURE_UDEREF) && this_cpu_has(X86_FEATURE_PCID)) {
+		unsigned int cpu = raw_get_cpu();
+
+		native_write_cr3(__pa(get_cpu_pgd(cpu, uaccess)) | PCID_USER | PCID_NOFLUSH);
+		asm volatile("invlpg (%0)" ::"r" (addr) : "memory");
+		native_write_cr3(__pa(get_cpu_pgd(cpu, kernel)) | PCID_KERNEL | PCID_NOFLUSH);
+		raw_put_cpu_no_resched();
+
+		// we could omit the next invlpg in PCID_KERNEL for user addresses when !SMAP...
+		//if (static_cpu_has(X86_FEATURE_SMAP) || addr >= TASK_SIZE_MAX)
+			asm volatile("invlpg (%0)" ::"r" (addr) : "memory");
+		return;
+	}
+#endif
+
 	/*
 	 * SIMICS #GP's if you run INVPCID with type 2/3
 	 * and X86_CR4_PCIDE clear.  Shame!
@@ -251,7 +321,10 @@ static inline void __native_flush_tlb_single(unsigned long addr)
 
 static inline void __flush_tlb_all(void)
 {
-	__flush_tlb_global();
+	if (boot_cpu_has(X86_FEATURE_PGE))
+		__flush_tlb_global();
+	else
+		__flush_tlb();
 	/*
 	 * Note: if we somehow had PCID but not PGE, then this wouldn't work --
 	 * we'd end up flushing kernel translations for the current ASID but

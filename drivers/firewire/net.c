@@ -627,6 +627,9 @@ static int fwnet_incoming_packet(struct fwnet_device *dev, __be32 *buf, int len,
 	if (fg_off + len > dg_size)
 		return 0;
 
+	if (fg_off + len > dg_size)
+		return 0;
+
 	spin_lock_irqsave(&dev->lock, flags);
 
 	peer = fwnet_peer_find_by_node_id(dev, source_node_id, generation);

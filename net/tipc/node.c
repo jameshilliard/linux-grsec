@@ -917,8 +917,8 @@ int tipc_node_get_linkname(struct net *net, u32 bearer_id, u32 addr,
 		strncpy(linkname, link->name, len);
 		err = 0;
 	}
-exit:
 	tipc_node_unlock(node);
+exit:
 	tipc_node_put(node);
 	return err;
 }

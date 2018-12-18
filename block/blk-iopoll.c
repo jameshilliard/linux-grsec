@@ -74,7 +74,7 @@ void blk_iopoll_complete(struct blk_iopoll *iop)
 }
 EXPORT_SYMBOL(blk_iopoll_complete);
 
-static void blk_iopoll_softirq(struct softirq_action *h)
+static __latent_entropy void blk_iopoll_softirq(void)
 {
 	struct list_head *list = this_cpu_ptr(&blk_cpu_iopoll);
 	int rearm = 0, budget = blk_iopoll_budget;

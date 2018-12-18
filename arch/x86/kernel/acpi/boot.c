@@ -201,6 +201,11 @@ acpi_parse_x2apic(struct acpi_subtable_header *header, const unsigned long end)
 
 	apic_id = processor->local_apic_id;
 	enabled = processor->lapic_flags & ACPI_MADT_ENABLED;
+
+	/* Ignore invalid ID */
+	if (apic_id == 0xffffffff)
+		return 0;
+
 #ifdef CONFIG_X86_X2APIC
 	/*
 	 * We need to register disabled CPU as well to permit
@@ -1364,7 +1369,7 @@ static void __init acpi_reduced_hw_init(void)
  * If your system is blacklisted here, but you find that acpi=force
  * works for you, please contact linux-acpi@vger.kernel.org
  */
-static struct dmi_system_id __initdata acpi_dmi_table[] = {
+static const struct dmi_system_id __initconst acpi_dmi_table[] = {
 	/*
 	 * Boxes that need ACPI disabled
 	 */
@@ -1439,7 +1444,7 @@ static struct dmi_system_id __initdata acpi_dmi_table[] = {
 };
 
 /* second table for DMI checks that should run after early-quirks */
-static struct dmi_system_id __initdata acpi_dmi_table_late[] = {
+static const struct dmi_system_id __initconst acpi_dmi_table_late[] = {
 	/*
 	 * HP laptops which use a DSDT reporting as HP/SB400/10000,
 	 * which includes some code which overrides all temperature

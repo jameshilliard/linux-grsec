@@ -2,6 +2,7 @@
 #include <linux/errno.h>
 #include <asm/asm.h>
 #include <asm/msr.h>
+#include <asm/nospec-branch.h>
 
 #ifdef CONFIG_X86_64
 /*
@@ -34,6 +35,7 @@ ENTRY(\op\()_safe_regs)
 	movl    %edi, 28(%r10)
 	popq %rbp
 	popq %rbx
+	pax_force_retaddr
 	ret
 3:
 	movl    $-EIO, %r11d

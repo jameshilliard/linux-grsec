@@ -61,8 +61,14 @@ static bool tls_desc_okay(const struct user_desc *info)
 		return false;
 
 	/* Only allow data segments in the TLS array. */
-	if (info->contents > 1)
+	if (info->contents & MODIFY_LDT_CONTENTS_CODE)
 		return false;
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	/* Don't allow data segments to start over the kernel */
+	if (static_cpu_has(X86_FEATURE_UDEREF) && info->base_addr >= __PAGE_OFFSET)
+		return false;
+#endif
 
 	/*
 	 * Non-present segments with DPL 3 present an interesting attack
@@ -84,6 +90,9 @@ static void set_tls_desc(struct task_struct *p, int idx,
 {
 	struct thread_struct *t = &p->thread;
 	struct desc_struct *desc = &t->tls_array[idx - GDT_ENTRY_TLS_MIN];
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	struct desc_struct *desc_inverted = &t->tls_array_inverted[idx - GDT_ENTRY_TLS_MIN];
+#endif
 	int cpu;
 
 	/*
@@ -92,12 +101,70 @@ static void set_tls_desc(struct task_struct *p, int idx,
 	cpu = get_cpu();
 
 	while (n-- > 0) {
-		if (LDT_empty(info) || LDT_zero(info))
+		if (LDT_empty(info) || LDT_zero(info)) {
 			desc->a = desc->b = 0;
-		else
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+			memset(desc_inverted, 0, sizeof(*desc_inverted));
+#endif
+		} else
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (static_cpu_has(X86_FEATURE_UDEREF) && boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN)) {
+			unsigned int limit = info->limit;
+			struct user_desc temp = *info;
+			struct user_desc temp_inverted = {};
+
+			if (temp.limit_in_pages)
+				limit = (limit << 12) | (PAGE_SIZE - 1);
+
+			if (temp.contents & MODIFY_LDT_CONTENTS_STACK) {
+				/*
+				 * Expand-down segment limit checking/adjustment
+				 * Note that we have to allow covering up to the
+				 * last virtual page which is unmapped
+				 */
+				if (limit <= ULONG_MAX - temp.base_addr) {
+					limit = ULONG_MAX - temp.base_addr - (PAGE_SIZE - 1);
+					if (temp.limit_in_pages)
+						limit >>= 12;
+					temp.limit = limit;
+
+					temp_inverted = *info;
+					temp_inverted.contents ^= MODIFY_LDT_CONTENTS_STACK;
+					limit = __PAGE_OFFSET - temp_inverted.base_addr;
+					if (temp_inverted.limit_in_pages)
+						limit >>= 12;
+					temp_inverted.limit = limit;
+				}
+			} else {
+				/*
+				 * Expand-up segment limit checking/adjustment
+				 * Note that we have to allow covering up to the
+				 * first page of vmlinux which contains no secrets
+				 */
+				if (limit > __PAGE_OFFSET - temp.base_addr) {
+					limit = __PAGE_OFFSET - temp.base_addr;
+					if (temp.limit_in_pages)
+						limit >>= 12;
+					temp.limit = limit;
+
+					temp_inverted = *info;
+					temp_inverted.contents ^= MODIFY_LDT_CONTENTS_STACK;
+					limit = ULONG_MAX - temp_inverted.base_addr - (PAGE_SIZE - 1);
+					if (temp_inverted.limit_in_pages)
+						limit >>= 12;
+					temp_inverted.limit = limit;
+				}
+			}
+			fill_ldt(desc, &temp);
+			fill_ldt(desc_inverted, &temp_inverted);
+		} else
+#endif
 			fill_ldt(desc, info);
 		++info;
 		++desc;
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		++desc_inverted;
+#endif
 	}
 
 	if (t == &current->thread)
@@ -213,6 +280,9 @@ int regset_tls_get(struct task_struct *target, const struct user_regset *regset,
 {
 	const struct desc_struct *tls;
 
+	if (kbuf && pos < count)
+		memset(kbuf + pos, PAX_MEMORY_SANITIZE_VALUE, count - pos);
+
 	if (pos >= GDT_ENTRY_TLS_ENTRIES * sizeof(struct user_desc) ||
 	    (pos % sizeof(struct user_desc)) != 0 ||
 	    (count % sizeof(struct user_desc)) != 0)
@@ -256,7 +326,7 @@ int regset_tls_set(struct task_struct *target, const struct user_regset *regset,
 
 	if (kbuf)
 		info = kbuf;
-	else if (__copy_from_user(infobuf, ubuf, count))
+	else if (count > sizeof infobuf || __copy_from_user(infobuf, ubuf, count))
 		return -EFAULT;
 	else
 		info = infobuf;

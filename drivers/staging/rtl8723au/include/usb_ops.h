@@ -36,9 +36,9 @@ enum {
 
 void rtl8723au_set_hw_type(struct rtw_adapter *padapter);
 
-void rtl8723au_recv_tasklet(void *priv);
+void rtl8723au_recv_tasklet(unsigned long priv);
 
-void rtl8723au_xmit_tasklet(void *priv);
+void rtl8723au_xmit_tasklet(unsigned long priv);
 
 /* Increase and check if the continual_urb_error of this @param dvobjprive is
  * larger than MAX_CONTINUAL_URB_ERR. Return result
@@ -48,7 +48,7 @@ static inline int rtw_inc_and_chk_continual_urb_error(struct dvobj_priv *dvobj)
 	int ret = false;
 	int value;
 
-	value = atomic_inc_return(&dvobj->continual_urb_error);
+	value = atomic_inc_return_unchecked(&dvobj->continual_urb_error);
 	if (value > MAX_CONTINUAL_URB_ERR) {
 		DBG_8723A("[dvobj:%p][ERROR] continual_urb_error:%d > %d\n",
 			  dvobj, value, MAX_CONTINUAL_URB_ERR);
@@ -60,7 +60,7 @@ static inline int rtw_inc_and_chk_continual_urb_error(struct dvobj_priv *dvobj)
 /* Set the continual_urb_error of this @param dvobjprive to 0 */
 static inline void rtw_reset_continual_urb_error(struct dvobj_priv *dvobj)
 {
-	atomic_set(&dvobj->continual_urb_error, 0);
+	atomic_set_unchecked(&dvobj->continual_urb_error, 0);
 }
 
 bool rtl8723au_chip_configure(struct rtw_adapter *padapter);

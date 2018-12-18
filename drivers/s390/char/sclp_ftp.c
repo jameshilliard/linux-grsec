@@ -113,7 +113,7 @@ static int sclp_ftp_et7(const struct hmcdrv_ftp_cmdspec *ftp)
 	sccb->evbuf.mdd.ftp.length = ftp->len;
 	sccb->evbuf.mdd.ftp.bufaddr = virt_to_phys(ftp->buf);
 
-	len = strlcpy(sccb->evbuf.mdd.ftp.fident, ftp->fname,
+	len = strlcpy_check(sccb->evbuf.mdd.ftp.fident, ftp->fname,
 		      HMCDRV_FTP_FIDENT_MAX);
 	if (len >= HMCDRV_FTP_FIDENT_MAX) {
 		rc = -EINVAL;

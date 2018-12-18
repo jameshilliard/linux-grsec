@@ -591,8 +591,13 @@ tcp_syn_retries - INTEGER
 	with the current initial RTO of 1second. With this the final timeout
 	for an active TCP connection attempt will happen after 127seconds.
 
-tcp_timestamps - BOOLEAN
-	Enable timestamps as defined in RFC1323.
+tcp_timestamps - INTEGER
+Enable timestamps as defined in RFC1323.
+	0: Disabled.
+	1: Enable timestamps as defined in RFC1323 and use random offset for
+	each connection rather than only using the current time.
+	2: Like 1, but without random offsets.
+	Default: 1
 
 tcp_min_tso_segs - INTEGER
 	Minimal number of segments per TSO frame.
@@ -624,11 +629,6 @@ tcp_tso_win_divisor - INTEGER
 	The setting of this parameter is a choice between burstiness and
 	building larger TSO frames.
 	Default: 3
-
-tcp_tw_recycle - BOOLEAN
-	Enable fast recycling TIME-WAIT sockets. Default value is 0.
-	It should not be changed without advice/request of technical
-	experts.
 
 tcp_tw_reuse - BOOLEAN
 	Allow to reuse TIME-WAIT sockets for new connections when it is

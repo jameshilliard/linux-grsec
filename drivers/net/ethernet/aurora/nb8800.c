@@ -259,6 +259,7 @@ static void nb8800_receive(struct net_device *dev, unsigned int i,
 		if (err) {
 			netdev_err(dev, "rx buffer allocation failed\n");
 			dev->stats.rx_dropped++;
+			dev_kfree_skb(skb);
 			return;
 		}
 
@@ -395,7 +396,7 @@ static void nb8800_tx_dma_start_irq(struct net_device *dev)
 	spin_unlock(&priv->tx_lock);
 }
 
-static int nb8800_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t nb8800_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct nb8800_priv *priv = netdev_priv(dev);
 	struct nb8800_tx_desc *txd;
@@ -1509,6 +1510,7 @@ static int nb8800_probe(struct platform_device *pdev)
 err_free_dma:
 	nb8800_dma_free(dev);
 err_free_bus:
+	of_node_put(priv->phy_node);
 	mdiobus_unregister(bus);
 err_disable_clk:
 	clk_disable_unprepare(priv->clk);
@@ -1524,6 +1526,7 @@ static int nb8800_remove(struct platform_device *pdev)
 	struct nb8800_priv *priv = netdev_priv(ndev);
 
 	unregister_netdev(ndev);
+	of_node_put(priv->phy_node);
 
 	mdiobus_unregister(priv->mii_bus);
 

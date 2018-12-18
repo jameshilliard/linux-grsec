@@ -62,7 +62,7 @@ void rds_tcp_nonagle(struct socket *sock)
 	int val = 1;
 
 	set_fs(KERNEL_DS);
-	sock->ops->setsockopt(sock, SOL_TCP, TCP_NODELAY, (char __user *)&val,
+	sock->ops->setsockopt(sock, SOL_TCP, TCP_NODELAY, (char __force_user *)&val,
 			      sizeof(val));
 	set_fs(oldfs);
 }
@@ -409,32 +409,32 @@ static int rds_tcp_init(void)
 		goto out;
 	}
 
-	ret = register_netdevice_notifier(&rds_tcp_dev_notifier);
-	if (ret) {
-		pr_warn("could not register rds_tcp_dev_notifier\n");
-		goto out;
-	}
-
-	ret = register_pernet_subsys(&rds_tcp_net_ops);
+	ret = rds_tcp_recv_init();
 	if (ret)
 		goto out_slab;
 
-	ret = rds_tcp_recv_init();
+	ret = register_pernet_subsys(&rds_tcp_net_ops);
 	if (ret)
+		goto out_recv;
+
+	ret = register_netdevice_notifier(&rds_tcp_dev_notifier);
+	if (ret) {
+		pr_warn("could not register rds_tcp_dev_notifier\n");
 		goto out_pernet;
+	}
 
 	ret = rds_trans_register(&rds_tcp_transport);
 	if (ret)
-		goto out_recv;
+		goto out_pernet;
 
 	rds_info_register_func(RDS_INFO_TCP_SOCKETS, rds_tcp_tc_info);
 
 	goto out;
 
-out_recv:
-	rds_tcp_recv_exit();
 out_pernet:
 	unregister_pernet_subsys(&rds_tcp_net_ops);
+out_recv:
+	rds_tcp_recv_exit();
 out_slab:
 	kmem_cache_destroy(rds_tcp_conn_slab);
 out:

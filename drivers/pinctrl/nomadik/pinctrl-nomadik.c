@@ -1212,7 +1212,7 @@ static int nmk_gpio_probe(struct platform_device *dev)
 	struct device_node *np = dev->dev.of_node;
 	struct nmk_gpio_chip *nmk_chip;
 	struct gpio_chip *chip;
-	struct irq_chip *irqchip;
+	irq_chip_no_const *irqchip;
 	int latent_irq;
 	bool supports_sleepmode;
 	int irq;

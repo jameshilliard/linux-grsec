@@ -118,7 +118,9 @@ static int socfpga_dwmac_parse_data(struct socfpga_dwmac *dwmac, struct device *
 
 	np_splitter = of_parse_phandle(np, "altr,emac-splitter", 0);
 	if (np_splitter) {
-		if (of_address_to_resource(np_splitter, 0, &res_splitter)) {
+		ret = of_address_to_resource(np_splitter, 0, &res_splitter);
+		of_node_put(np_splitter);
+		if (ret) {
 			dev_info(dev, "Missing emac splitter address\n");
 			return -EINVAL;
 		}

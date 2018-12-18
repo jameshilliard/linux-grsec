@@ -64,14 +64,15 @@ static inline void __down_read(struct rw_semaphore *sem)
 {
 	asm volatile("# beginning down_read\n\t"
 		     LOCK_PREFIX _ASM_INC "(%1)\n\t"
+		     PAX_REFCOUNT_OVERFLOW(BITS_PER_LONG/8)
 		     /* adds 0x00000001 */
 		     "  jns        1f\n"
 		     "  call call_rwsem_down_read_failed\n"
 		     "1:\n\t"
 		     "# ending down_read\n\t"
-		     : "+m" (sem->count)
+		     : [counter] "+m" (sem->count)
 		     : "a" (sem)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 }
 
 /*
@@ -85,14 +86,15 @@ static inline int __down_read_trylock(struct rw_semaphore *sem)
 		     "1:\n\t"
 		     "  mov          %1,%2\n\t"
 		     "  add          %3,%2\n\t"
+		     PAX_REFCOUNT_OVERFLOW(BITS_PER_LONG/8)
 		     "  jle	     2f\n\t"
 		     LOCK_PREFIX "  cmpxchg  %2,%0\n\t"
 		     "  jnz	     1b\n\t"
 		     "2:\n\t"
 		     "# ending __down_read_trylock\n\t"
-		     : "+m" (sem->count), "=&a" (result), "=&r" (tmp)
+		     : [counter] "+m" (sem->count), "=&a" (result), "=&r" (tmp)
 		     : "i" (RWSEM_ACTIVE_READ_BIAS)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 	return result >= 0 ? 1 : 0;
 }
 
@@ -104,6 +106,7 @@ static inline void __down_write_nested(struct rw_semaphore *sem, int subclass)
 	long tmp;
 	asm volatile("# beginning down_write\n\t"
 		     LOCK_PREFIX "  xadd      %1,(%2)\n\t"
+		     PAX_REFCOUNT_OVERFLOW(BITS_PER_LONG/8)\
 		     /* adds 0xffff0001, returns the old value */
 		     "  test " __ASM_SEL(%w1,%k1) "," __ASM_SEL(%w1,%k1) "\n\t"
 		     /* was the active mask 0 before? */
@@ -111,9 +114,9 @@ static inline void __down_write_nested(struct rw_semaphore *sem, int subclass)
 		     "  call call_rwsem_down_write_failed\n"
 		     "1:\n"
 		     "# ending down_write"
-		     : "+m" (sem->count), "=d" (tmp)
+		     : [counter] "+m" (sem->count), "=d" (tmp)
 		     : "a" (sem), "1" (RWSEM_ACTIVE_WRITE_BIAS)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 }
 
 static inline void __down_write(struct rw_semaphore *sem)
@@ -135,15 +138,16 @@ static inline int __down_write_trylock(struct rw_semaphore *sem)
 		     "  jnz          2f\n\t"
 		     "  mov          %1,%2\n\t"
 		     "  add          %3,%2\n\t"
+		     PAX_REFCOUNT_OVERFLOW(BITS_PER_LONG/8)
 		     LOCK_PREFIX "  cmpxchg  %2,%0\n\t"
 		     "  jnz	     1b\n\t"
 		     "2:\n\t"
 		     "  sete         %b1\n\t"
 		     "  movzbl       %b1, %k1\n\t"
 		     "# ending __down_write_trylock\n\t"
-		     : "+m" (sem->count), "=&a" (result), "=&r" (tmp)
+		     : [counter] "+m" (sem->count), "=&a" (result), "=&r" (tmp)
 		     : "er" (RWSEM_ACTIVE_WRITE_BIAS)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 	return result;
 }
 
@@ -155,14 +159,15 @@ static inline void __up_read(struct rw_semaphore *sem)
 	long tmp;
 	asm volatile("# beginning __up_read\n\t"
 		     LOCK_PREFIX "  xadd      %1,(%2)\n\t"
+		     PAX_REFCOUNT_UNDERFLOW(BITS_PER_LONG/8)
 		     /* subtracts 1, returns the old value */
 		     "  jns        1f\n\t"
 		     "  call call_rwsem_wake\n" /* expects old value in %edx */
 		     "1:\n"
 		     "# ending __up_read\n"
-		     : "+m" (sem->count), "=d" (tmp)
+		     : [counter] "+m" (sem->count), "=d" (tmp)
 		     : "a" (sem), "1" (-RWSEM_ACTIVE_READ_BIAS)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 }
 
 /*
@@ -173,14 +178,15 @@ static inline void __up_write(struct rw_semaphore *sem)
 	long tmp;
 	asm volatile("# beginning __up_write\n\t"
 		     LOCK_PREFIX "  xadd      %1,(%2)\n\t"
+		     PAX_REFCOUNT_UNDERFLOW(BITS_PER_LONG/8)
 		     /* subtracts 0xffff0001, returns the old value */
 		     "  jns        1f\n\t"
 		     "  call call_rwsem_wake\n" /* expects old value in %edx */
 		     "1:\n\t"
 		     "# ending __up_write\n"
-		     : "+m" (sem->count), "=d" (tmp)
+		     : [counter] "+m" (sem->count), "=d" (tmp)
 		     : "a" (sem), "1" (-RWSEM_ACTIVE_WRITE_BIAS)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 }
 
 /*
@@ -190,6 +196,7 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
 {
 	asm volatile("# beginning __downgrade_write\n\t"
 		     LOCK_PREFIX _ASM_ADD "%2,(%1)\n\t"
+		     PAX_REFCOUNT_OVERFLOW(BITS_PER_LONG/8)
 		     /*
 		      * transitions 0xZZZZ0001 -> 0xYYYY0001 (i386)
 		      *     0xZZZZZZZZ00000001 -> 0xYYYYYYYY00000001 (x86_64)
@@ -198,9 +205,9 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
 		     "  call call_rwsem_downgrade_wake\n"
 		     "1:\n\t"
 		     "# ending __downgrade_write\n"
-		     : "+m" (sem->count)
+		     : [counter] "+m" (sem->count)
 		     : "a" (sem), "er" (-RWSEM_WAITING_BIAS)
-		     : "memory", "cc");
+		     : "memory", "cc", "cx");
 }
 
 /*
@@ -208,9 +215,11 @@ static inline void __downgrade_write(struct rw_semaphore *sem)
  */
 static inline void rwsem_atomic_add(long delta, struct rw_semaphore *sem)
 {
-	asm volatile(LOCK_PREFIX _ASM_ADD "%1,%0"
-		     : "+m" (sem->count)
-		     : "er" (delta));
+	asm volatile(LOCK_PREFIX _ASM_ADD "%1,%0\n"
+		     PAX_REFCOUNT_OVERFLOW(BITS_PER_LONG/8)
+		     : [counter] "+m" (sem->count)
+		     : "er" (delta)
+		     : "cc", "cx");
 }
 
 /*
@@ -218,7 +227,7 @@ static inline void rwsem_atomic_add(long delta, struct rw_semaphore *sem)
  */
 static inline long rwsem_atomic_update(long delta, struct rw_semaphore *sem)
 {
-	return delta + xadd(&sem->count, delta);
+	return delta + xadd_check_overflow(&sem->count, delta);
 }
 
 #endif /* __KERNEL__ */

@@ -871,7 +871,7 @@ ext4_find_extent(struct inode *inode, ext4_lblk_t block,
 	struct ext4_extent_header *eh;
 	struct buffer_head *bh;
 	struct ext4_ext_path *path = orig_path ? *orig_path : NULL;
-	short int depth, i, ppos = 0;
+	int depth, i, ppos = 0;
 	int ret;
 
 	eh = ext_inode_hdr(inode);
@@ -5885,7 +5885,7 @@ ext4_swap_extents(handle_t *handle, struct inode *inode1,
 			if (e1_blk > lblk1)
 				next1 = e1_blk;
 			if (e2_blk > lblk2)
-				next2 = e1_blk;
+				next2 = e2_blk;
 			/* Do we have something to swap */
 			if (next1 == EXT_MAX_BLOCKS || next2 == EXT_MAX_BLOCKS)
 				goto finish;

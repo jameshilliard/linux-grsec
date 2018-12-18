@@ -110,14 +110,15 @@ void scatterwalk_map_and_copy(void *buf, struct scatterlist *sg,
 {
 	struct scatter_walk walk;
 	struct scatterlist tmp[2];
+	const void *realbuf = gr_convert_stack_address_to_lowmem(buf);
 
 	if (!nbytes)
 		return;
 
 	sg = scatterwalk_ffwd(tmp, sg, start);
 
-	if (sg_page(sg) == virt_to_page(buf) &&
-	    sg->offset == offset_in_page(buf))
+	if (sg_page(sg) == virt_to_page(realbuf) &&
+	    sg->offset == offset_in_page(realbuf))
 		return;
 
 	scatterwalk_start(&walk, sg);

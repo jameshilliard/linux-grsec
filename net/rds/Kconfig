@@ -2,6 +2,7 @@
 config RDS
 	tristate "The RDS Protocol"
 	depends on INET
+	default n
 	---help---
 	  The RDS (Reliable Datagram Sockets) protocol provides reliable,
 	  sequenced delivery of datagrams over Infiniband, iWARP,

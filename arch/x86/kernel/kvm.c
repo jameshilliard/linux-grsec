@@ -140,7 +140,8 @@ void kvm_async_pf_task_wait(u32 token)
 
 	n.token = token;
 	n.cpu = smp_processor_id();
-	n.halted = is_idle_task(current) || preempt_count() > 1;
+	n.halted = is_idle_task(current) || preempt_count() > 1 ||
+		   rcu_preempt_depth();
 	init_waitqueue_head(&n.wq);
 	hlist_add_head(&n.link, &b->list);
 	spin_unlock(&b->lock);
@@ -555,7 +556,7 @@ static uint32_t __init kvm_detect(void)
 	return kvm_cpuid_base();
 }
 
-const struct hypervisor_x86 x86_hyper_kvm __refconst = {
+const struct hypervisor_x86 x86_hyper_kvm = {
 	.name			= "KVM",
 	.detect			= kvm_detect,
 	.x2apic_available	= kvm_para_available,
@@ -868,11 +869,11 @@ void __init kvm_spinlock_init(void)
 #ifdef CONFIG_QUEUED_SPINLOCKS
 	__pv_init_lock_hash();
 	pv_lock_ops.queued_spin_lock_slowpath = __pv_queued_spin_lock_slowpath;
-	pv_lock_ops.queued_spin_unlock = PV_CALLEE_SAVE(__pv_queued_spin_unlock);
+	pv_lock_ops.queued_spin_unlock = PV_CALLEE_SAVE(queued_spin_unlock, __pv_queued_spin_unlock);
 	pv_lock_ops.wait = kvm_wait;
 	pv_lock_ops.kick = kvm_kick_cpu;
 #else /* !CONFIG_QUEUED_SPINLOCKS */
-	pv_lock_ops.lock_spinning = PV_CALLEE_SAVE(kvm_lock_spinning);
+	pv_lock_ops.lock_spinning = PV_CALLEE_SAVE(lock_spinning, kvm_lock_spinning);
 	pv_lock_ops.unlock_kick = kvm_unlock_kick;
 #endif
 }

@@ -80,7 +80,7 @@ static int tweak_clear_halt_cmd(struct urb *urb)
 	struct usb_ctrlrequest *req;
 	int target_endp;
 	int target_dir;
-	int target_pipe;
+	unsigned int target_pipe;
 	int ret;
 
 	req = (struct usb_ctrlrequest *) urb->setup_packet;
@@ -338,7 +338,7 @@ static struct stub_priv *stub_priv_alloc(struct stub_device *sdev,
 	return priv;
 }
 
-static int get_pipe(struct stub_device *sdev, struct usbip_header *pdu)
+static unsigned int get_pipe(struct stub_device *sdev, struct usbip_header *pdu)
 {
 	struct usb_device *udev = sdev->udev;
 	struct usb_host_endpoint *ep;
@@ -357,6 +357,14 @@ static int get_pipe(struct stub_device *sdev, struct usbip_header *pdu)
 		goto err_ret;
 
 	epd = &ep->desc;
+
+	/* validate transfer_buffer_length */
+	if (pdu->u.cmd_submit.transfer_buffer_length > INT_MAX) {
+		dev_err(&sdev->interface->dev,
+			"CMD_SUBMIT: -EMSGSIZE transfer_buffer_length %d\n",
+			pdu->u.cmd_submit.transfer_buffer_length);
+		return 0;
+	}
 
 	if (usb_endpoint_xfer_control(epd)) {
 		if (dir == USBIP_DIR_OUT)
@@ -383,23 +391,17 @@ static int get_pipe(struct stub_device *sdev, struct usbip_header *pdu)
 		/* validate packet size and number of packets */
 		unsigned int maxp, packets, bytes;
 
-#define USB_EP_MAXP_MULT_SHIFT  11
-#define USB_EP_MAXP_MULT_MASK   (3 << USB_EP_MAXP_MULT_SHIFT)
-#define USB_EP_MAXP_MULT(m) \
-	(((m) & USB_EP_MAXP_MULT_MASK) >> USB_EP_MAXP_MULT_SHIFT)
-
 		maxp = usb_endpoint_maxp(epd);
-		maxp *= (USB_EP_MAXP_MULT(
-				__le16_to_cpu(epd->wMaxPacketSize)) + 1);
+		maxp *= usb_endpoint_maxp_mult(epd);
 		bytes = pdu->u.cmd_submit.transfer_buffer_length;
 		packets = DIV_ROUND_UP(bytes, maxp);
 
 		if (pdu->u.cmd_submit.number_of_packets < 0 ||
 		    pdu->u.cmd_submit.number_of_packets > packets) {
-			dev_err(&sdev->udev->dev,
+			dev_err(&sdev->interface->dev,
 				"CMD_SUBMIT: isoc invalid num packets %d\n",
 				pdu->u.cmd_submit.number_of_packets);
-			return -1;
+			return 0;
 		}
 		if (dir == USBIP_DIR_OUT)
 			return usb_sndisocpipe(udev, epnum);
@@ -409,8 +411,8 @@ static int get_pipe(struct stub_device *sdev, struct usbip_header *pdu)
 
 err_ret:
 	/* NOT REACHED */
-	dev_err(&sdev->udev->dev, "CMD_SUBMIT: invalid epnum %d\n", epnum);
-	return -1;
+	dev_err(&sdev->interface->dev, "CMD_SUBMIT: invalid epnum %d\n", epnum);
+	return 0;
 }
 
 static void masking_bogus_flags(struct urb *urb)
@@ -474,9 +476,9 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 	struct stub_priv *priv;
 	struct usbip_device *ud = &sdev->ud;
 	struct usb_device *udev = sdev->udev;
-	int pipe = get_pipe(sdev, pdu);
+	unsigned int pipe = get_pipe(sdev, pdu);
 
-	if (pipe == -1)
+	if (!pipe)
 		return;
 
 	priv = stub_priv_alloc(sdev, pdu);
@@ -497,7 +499,8 @@ static void stub_recv_cmd_submit(struct stub_device *sdev,
 	}
 
 	/* allocate urb transfer buffer, if needed */
-	if (pdu->u.cmd_submit.transfer_buffer_length > 0) {
+	if (pdu->u.cmd_submit.transfer_buffer_length > 0 &&
+	    pdu->u.cmd_submit.transfer_buffer_length <= INT_MAX) {
 		priv->urb->transfer_buffer =
 			kzalloc(pdu->u.cmd_submit.transfer_buffer_length,
 				GFP_KERNEL);

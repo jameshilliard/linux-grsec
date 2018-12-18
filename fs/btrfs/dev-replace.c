@@ -85,8 +85,8 @@ no_valid_dev_replace_entry_found:
 		dev_replace->replace_state = 0;
 		dev_replace->time_started = 0;
 		dev_replace->time_stopped = 0;
-		atomic64_set(&dev_replace->num_write_errors, 0);
-		atomic64_set(&dev_replace->num_uncorrectable_read_errors, 0);
+		atomic64_set_unchecked(&dev_replace->num_write_errors, 0);
+		atomic64_set_unchecked(&dev_replace->num_uncorrectable_read_errors, 0);
 		dev_replace->cursor_left = 0;
 		dev_replace->committed_cursor_left = 0;
 		dev_replace->cursor_left_last_write_of_item = 0;
@@ -115,9 +115,9 @@ no_valid_dev_replace_entry_found:
 	dev_replace->time_started = btrfs_dev_replace_time_started(eb, ptr);
 	dev_replace->time_stopped =
 		btrfs_dev_replace_time_stopped(eb, ptr);
-	atomic64_set(&dev_replace->num_write_errors,
+	atomic64_set_unchecked(&dev_replace->num_write_errors,
 		     btrfs_dev_replace_num_write_errors(eb, ptr));
-	atomic64_set(&dev_replace->num_uncorrectable_read_errors,
+	atomic64_set_unchecked(&dev_replace->num_uncorrectable_read_errors,
 		     btrfs_dev_replace_num_uncorrectable_read_errors(eb, ptr));
 	dev_replace->cursor_left = btrfs_dev_replace_cursor_left(eb, ptr);
 	dev_replace->committed_cursor_left = dev_replace->cursor_left;
@@ -277,9 +277,9 @@ int btrfs_run_dev_replace(struct btrfs_trans_handle *trans,
 	btrfs_set_dev_replace_time_started(eb, ptr, dev_replace->time_started);
 	btrfs_set_dev_replace_time_stopped(eb, ptr, dev_replace->time_stopped);
 	btrfs_set_dev_replace_num_write_errors(eb, ptr,
-		atomic64_read(&dev_replace->num_write_errors));
+		atomic64_read_unchecked(&dev_replace->num_write_errors));
 	btrfs_set_dev_replace_num_uncorrectable_read_errors(eb, ptr,
-		atomic64_read(&dev_replace->num_uncorrectable_read_errors));
+		atomic64_read_unchecked(&dev_replace->num_uncorrectable_read_errors));
 	dev_replace->cursor_left_last_write_of_item =
 		dev_replace->cursor_left;
 	btrfs_set_dev_replace_cursor_left(eb, ptr,
@@ -577,7 +577,7 @@ static int btrfs_dev_replace_finishing(struct btrfs_fs_info *fs_info,
 	 * Increment dev_stats_ccnt so that btrfs_run_dev_stats() will
 	 * update on-disk dev stats value during commit transaction
 	 */
-	atomic_inc(&tgt_device->dev_stats_ccnt);
+	atomic_inc_unchecked(&tgt_device->dev_stats_ccnt);
 
 	/*
 	 * this is again a consistent state where no dev_replace procedure
@@ -663,9 +663,9 @@ void btrfs_dev_replace_status(struct btrfs_fs_info *fs_info,
 	args->status.time_started = dev_replace->time_started;
 	args->status.time_stopped = dev_replace->time_stopped;
 	args->status.num_write_errors =
-		atomic64_read(&dev_replace->num_write_errors);
+		atomic64_read_unchecked(&dev_replace->num_write_errors);
 	args->status.num_uncorrectable_read_errors =
-		atomic64_read(&dev_replace->num_uncorrectable_read_errors);
+		atomic64_read_unchecked(&dev_replace->num_uncorrectable_read_errors);
 	switch (dev_replace->replace_state) {
 	case BTRFS_IOCTL_DEV_REPLACE_STATE_NEVER_STARTED:
 	case BTRFS_IOCTL_DEV_REPLACE_STATE_CANCELED:

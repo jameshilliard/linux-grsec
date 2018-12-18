@@ -56,7 +56,7 @@ DECLARE_EWMA(pkt_len, 1, 64)
 
 /* Minimum alignment for mergeable packet buffers. */
 #define MERGEABLE_BUFFER_ALIGN max(L1_CACHE_BYTES, \
-				   1 << MERGEABLE_BUFFER_MIN_ALIGN_SHIFT)
+				   1UL << MERGEABLE_BUFFER_MIN_ALIGN_SHIFT)
 
 #define VIRTNET_DRIVER_VERSION "1.0.0"
 

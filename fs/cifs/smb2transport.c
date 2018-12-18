@@ -369,6 +369,12 @@ smb3_calc_signature(struct smb_rqst *rqst, struct TCP_Server_Info *server)
 	memset(smb3_signature, 0x0, SMB2_CMACAES_SIZE);
 	memset(smb2_pdu->Signature, 0x0, SMB2_SIGNATURE_SIZE);
 
+	rc = smb3_crypto_shash_allocate(server);
+	if (rc) {
+		cifs_dbg(VFS, "%s: shah256 alloc failed\n", __func__);
+		return rc;
+	}
+
 	rc = crypto_shash_setkey(server->secmech.cmacaes,
 		ses->smb3signingkey, SMB2_CMACAES_SIZE);
 

@@ -22,6 +22,10 @@
 #include <linux/gfp.h>
 #include <net/tcp.h>
 
+#ifdef CONFIG_GRKERNSEC_BLACKHOLE
+extern int grsec_lastack_retries;
+#endif
+
 int sysctl_tcp_syn_retries __read_mostly = TCP_SYN_RETRIES;
 int sysctl_tcp_synack_retries __read_mostly = TCP_SYNACK_RETRIES;
 int sysctl_tcp_keepalive_time __read_mostly = TCP_KEEPALIVE_TIME;
@@ -184,8 +188,8 @@ static int tcp_write_timeout(struct sock *sk)
 			if (tp->syn_fastopen || tp->syn_data)
 				tcp_fastopen_cache_set(sk, 0, NULL, true, 0);
 			if (tp->syn_data && icsk->icsk_retransmits == 1)
-				NET_INC_STATS_BH(sock_net(sk),
-						 LINUX_MIB_TCPFASTOPENACTIVEFAIL);
+				NET_INC_STATS(sock_net(sk),
+					      LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 		}
 		retry_until = icsk->icsk_syn_retries ? : sysctl_tcp_syn_retries;
 		syn_set = true;
@@ -200,7 +204,7 @@ static int tcp_write_timeout(struct sock *sk)
 			    tp->bytes_acked <= tp->rx_opt.mss_clamp) {
 				tcp_fastopen_cache_set(sk, 0, NULL, true, 0);
 				if (icsk->icsk_retransmits == sysctl_tcp_retries1)
-					NET_INC_STATS_BH(sock_net(sk),
+					NET_INC_STATS(sock_net(sk),
 							 LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 			}
 			/* Black hole detection */
@@ -222,6 +226,13 @@ static int tcp_write_timeout(struct sock *sk)
 		}
 	}
 
+#ifdef CONFIG_GRKERNSEC_BLACKHOLE
+	if ((sk->sk_state == TCP_LAST_ACK) &&
+	    (grsec_lastack_retries > 0) &&
+	    (grsec_lastack_retries < retry_until))
+		retry_until = grsec_lastack_retries;
+#endif
+
 	if (retransmits_timed_out(sk, retry_until,
 				  syn_set ? 0 : icsk->icsk_user_timeout, syn_set)) {
 		/* Has it gone just too far? */
@@ -231,6 +242,7 @@ static int tcp_write_timeout(struct sock *sk)
 	return 0;
 }
 
+/* Called with BH disabled */
 void tcp_delack_timer_handler(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -515,6 +527,7 @@ out_reset_timer:
 out:;
 }
 
+/* Called with BH disabled */
 void tcp_write_timer_handler(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);

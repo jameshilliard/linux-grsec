@@ -6,18 +6,18 @@
 #include <linux/seqlock.h>
 
 struct fs_struct {
-	int users;
+	atomic_t users;
 	spinlock_t lock;
 	seqcount_t seq;
 	int umask;
 	int in_exec;
 	struct path root, pwd;
-};
+} __randomize_layout;
 
 extern struct kmem_cache *fs_cachep;
 
 extern void exit_fs(struct task_struct *);
-extern void set_fs_root(struct fs_struct *, const struct path *);
+extern void set_fs_root(struct fs_struct *, const struct path *, bool);
 extern void set_fs_pwd(struct fs_struct *, const struct path *);
 extern struct fs_struct *copy_fs_struct(struct fs_struct *);
 extern void free_fs_struct(struct fs_struct *);

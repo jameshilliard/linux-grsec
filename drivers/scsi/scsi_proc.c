@@ -58,6 +58,9 @@ static ssize_t proc_scsi_host_write(struct file *file, const char __user *buf,
 	if (!shost->hostt->write_info)
 		return -EINVAL;
 
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
 	page = (char *)__get_free_page(GFP_KERNEL);
 	if (page) {
 		ret = -EFAULT;
@@ -314,6 +317,9 @@ static ssize_t proc_scsi_write(struct file *file, const char __user *buf,
 
 	if (!buf || length > PAGE_SIZE)
 		return -EINVAL;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
 
 	buffer = (char *)__get_free_page(GFP_KERNEL);
 	if (!buffer)

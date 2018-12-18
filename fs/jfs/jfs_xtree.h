@@ -42,10 +42,10 @@ typedef struct xad {
 #define L2XTSLOTSIZE	4
 
 /* xad_t field construction */
-#define XADoffset(xad, offset64)\
-{\
-	(xad)->off1 = ((u64)offset64) >> 32;\
-	(xad)->off2 = __cpu_to_le32((offset64) & 0xffffffff);\
+static inline __turn_off_size_overflow void XADoffset(xad_t *xad, s64 offset64)
+{
+	xad->off1 = ((u64)offset64) >> 32;
+	xad->off2 = __cpu_to_le32((offset64) & 0xffffffff);
 }
 #define XADaddress(xad, address64) PXDaddress(&(xad)->loc, address64)
 #define XADlength(xad, length32) PXDlength(&(xad)->loc, length32)

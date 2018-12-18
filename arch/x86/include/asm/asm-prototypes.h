@@ -37,4 +37,5 @@ INDIRECT_THUNK(dx)
 INDIRECT_THUNK(si)
 INDIRECT_THUNK(di)
 INDIRECT_THUNK(bp)
+asmlinkage void __x86_return_thunk(void);
 #endif /* CONFIG_RETPOLINE */

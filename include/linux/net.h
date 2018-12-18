@@ -195,7 +195,7 @@ struct net_proto_family {
 	int		(*create)(struct net *net, struct socket *sock,
 				  int protocol, int kern);
 	struct module	*owner;
-};
+} __do_const;
 
 struct iovec;
 struct kvec;
@@ -210,6 +210,7 @@ enum {
 int sock_wake_async(struct socket_wq *sk_wq, int how, int band);
 int sock_register(const struct net_proto_family *fam);
 void sock_unregister(int family);
+bool sock_is_registered(int family);
 int __sock_create(struct net *net, int family, int type, int proto,
 		  struct socket **res, int kern);
 int sock_create(int family, int type, int proto, struct socket **res);

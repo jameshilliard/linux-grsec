@@ -6,6 +6,7 @@
 #ifdef CONFIG_PARAVIRT
 #include <asm/pgtable_types.h>
 #include <asm/asm.h>
+#include <asm/nospec-branch.h>
 
 #include <asm/paravirt_types.h>
 
@@ -86,7 +87,7 @@ static inline void write_cr3(unsigned long x)
 	PVOP_VCALL1(pv_mmu_ops.write_cr3, x);
 }
 
-static inline unsigned long __read_cr4(void)
+extern inline unsigned long __read_cr4(void)
 {
 	return PVOP_CALL0(unsigned long, pv_cpu_ops.read_cr4);
 }
@@ -405,11 +406,11 @@ static inline pte_t __pte(pteval_t val)
 
 	if (sizeof(pteval_t) > sizeof(long))
 		ret = PVOP_CALLEE2(pteval_t,
-				   pv_mmu_ops.make_pte,
+				   pv_mmu_ops, make_pte,
 				   val, (u64)val >> 32);
 	else
 		ret = PVOP_CALLEE1(pteval_t,
-				   pv_mmu_ops.make_pte,
+				   pv_mmu_ops, make_pte,
 				   val);
 
 	return (pte_t) { .pte = ret };
@@ -420,10 +421,10 @@ static inline pteval_t pte_val(pte_t pte)
 	pteval_t ret;
 
 	if (sizeof(pteval_t) > sizeof(long))
-		ret = PVOP_CALLEE2(pteval_t, pv_mmu_ops.pte_val,
+		ret = PVOP_CALLEE2(pteval_t, pv_mmu_ops, pte_val,
 				   pte.pte, (u64)pte.pte >> 32);
 	else
-		ret = PVOP_CALLEE1(pteval_t, pv_mmu_ops.pte_val,
+		ret = PVOP_CALLEE1(pteval_t, pv_mmu_ops, pte_val,
 				   pte.pte);
 
 	return ret;
@@ -434,10 +435,10 @@ static inline pgd_t __pgd(pgdval_t val)
 	pgdval_t ret;
 
 	if (sizeof(pgdval_t) > sizeof(long))
-		ret = PVOP_CALLEE2(pgdval_t, pv_mmu_ops.make_pgd,
+		ret = PVOP_CALLEE2(pgdval_t, pv_mmu_ops, make_pgd,
 				   val, (u64)val >> 32);
 	else
-		ret = PVOP_CALLEE1(pgdval_t, pv_mmu_ops.make_pgd,
+		ret = PVOP_CALLEE1(pgdval_t, pv_mmu_ops, make_pgd,
 				   val);
 
 	return (pgd_t) { ret };
@@ -448,10 +449,10 @@ static inline pgdval_t pgd_val(pgd_t pgd)
 	pgdval_t ret;
 
 	if (sizeof(pgdval_t) > sizeof(long))
-		ret =  PVOP_CALLEE2(pgdval_t, pv_mmu_ops.pgd_val,
+		ret =  PVOP_CALLEE2(pgdval_t, pv_mmu_ops, pgd_val,
 				    pgd.pgd, (u64)pgd.pgd >> 32);
 	else
-		ret =  PVOP_CALLEE1(pgdval_t, pv_mmu_ops.pgd_val,
+		ret =  PVOP_CALLEE1(pgdval_t, pv_mmu_ops, pgd_val,
 				    pgd.pgd);
 
 	return ret;
@@ -527,24 +528,24 @@ static inline pmd_t __pmd(pmdval_t val)
 	pmdval_t ret;
 
 	if (sizeof(pmdval_t) > sizeof(long))
-		ret = PVOP_CALLEE2(pmdval_t, pv_mmu_ops.make_pmd,
+		ret = PVOP_CALLEE2(pmdval_t, pv_mmu_ops, make_pmd,
 				   val, (u64)val >> 32);
 	else
-		ret = PVOP_CALLEE1(pmdval_t, pv_mmu_ops.make_pmd,
+		ret = PVOP_CALLEE1(pmdval_t, pv_mmu_ops, make_pmd,
 				   val);
 
 	return (pmd_t) { ret };
 }
 
-static inline pmdval_t pmd_val(pmd_t pmd)
+static inline __intentional_overflow(-1) pmdval_t pmd_val(pmd_t pmd)
 {
 	pmdval_t ret;
 
 	if (sizeof(pmdval_t) > sizeof(long))
-		ret =  PVOP_CALLEE2(pmdval_t, pv_mmu_ops.pmd_val,
+		ret =  PVOP_CALLEE2(pmdval_t, pv_mmu_ops, pmd_val,
 				    pmd.pmd, (u64)pmd.pmd >> 32);
 	else
-		ret =  PVOP_CALLEE1(pmdval_t, pv_mmu_ops.pmd_val,
+		ret =  PVOP_CALLEE1(pmdval_t, pv_mmu_ops, pmd_val,
 				    pmd.pmd);
 
 	return ret;
@@ -567,10 +568,10 @@ static inline pud_t __pud(pudval_t val)
 	pudval_t ret;
 
 	if (sizeof(pudval_t) > sizeof(long))
-		ret = PVOP_CALLEE2(pudval_t, pv_mmu_ops.make_pud,
+		ret = PVOP_CALLEE2(pudval_t, pv_mmu_ops, make_pud,
 				   val, (u64)val >> 32);
 	else
-		ret = PVOP_CALLEE1(pudval_t, pv_mmu_ops.make_pud,
+		ret = PVOP_CALLEE1(pudval_t, pv_mmu_ops, make_pud,
 				   val);
 
 	return (pud_t) { ret };
@@ -581,10 +582,10 @@ static inline pudval_t pud_val(pud_t pud)
 	pudval_t ret;
 
 	if (sizeof(pudval_t) > sizeof(long))
-		ret =  PVOP_CALLEE2(pudval_t, pv_mmu_ops.pud_val,
+		ret =  PVOP_CALLEE2(pudval_t, pv_mmu_ops, pud_val,
 				    pud.pud, (u64)pud.pud >> 32);
 	else
-		ret =  PVOP_CALLEE1(pudval_t, pv_mmu_ops.pud_val,
+		ret =  PVOP_CALLEE1(pudval_t, pv_mmu_ops, pud_val,
 				    pud.pud);
 
 	return ret;
@@ -686,6 +687,21 @@ static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 	pv_mmu_ops.set_fixmap(idx, phys, flags);
 }
 
+#ifdef CONFIG_PAX_KERNEXEC
+static inline unsigned long pax_open_kernel(void)
+{
+	return PVOP_CALL0(unsigned long, pv_mmu_ops.pax_open_kernel);
+}
+
+static inline unsigned long pax_close_kernel(void)
+{
+	return PVOP_CALL0(unsigned long, pv_mmu_ops.pax_close_kernel);
+}
+#else
+static inline unsigned long pax_open_kernel(void) { return 0; }
+static inline unsigned long pax_close_kernel(void) { return 0; }
+#endif
+
 #if defined(CONFIG_SMP) && defined(CONFIG_PARAVIRT_SPINLOCKS)
 
 #ifdef CONFIG_QUEUED_SPINLOCKS
@@ -698,7 +714,7 @@ static __always_inline void pv_queued_spin_lock_slowpath(struct qspinlock *lock,
 
 static __always_inline void pv_queued_spin_unlock(struct qspinlock *lock)
 {
-	PVOP_VCALLEE1(pv_lock_ops.queued_spin_unlock, lock);
+	PVOP_VCALLEE1(pv_lock_ops, queued_spin_unlock, lock);
 }
 
 static __always_inline void pv_wait(u8 *ptr, u8 val)
@@ -716,7 +732,7 @@ static __always_inline void pv_kick(int cpu)
 static __always_inline void __ticket_lock_spinning(struct arch_spinlock *lock,
 							__ticket_t ticket)
 {
-	PVOP_VCALLEE2(pv_lock_ops.lock_spinning, lock, ticket);
+	PVOP_VCALLEE2(pv_lock_ops, lock_spinning, lock, ticket);
 }
 
 static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
@@ -734,8 +750,8 @@ static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
 #define PV_RESTORE_REGS "popl %edx; popl %ecx;"
 
 /* save and restore all caller-save registers, except return value */
-#define PV_SAVE_ALL_CALLER_REGS		"pushl %ecx;"
-#define PV_RESTORE_ALL_CALLER_REGS	"popl  %ecx;"
+#define PV_SAVE_ALL_CALLER_REGS		"pushl %%ecx;"
+#define PV_RESTORE_ALL_CALLER_REGS	"popl  %%ecx;"
 
 #define PV_FLAGS_ARG "0"
 #define PV_EXTRA_CLOBBERS
@@ -743,23 +759,23 @@ static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
 #else
 /* save and restore all caller-save registers, except return value */
 #define PV_SAVE_ALL_CALLER_REGS						\
-	"push %rcx;"							\
-	"push %rdx;"							\
-	"push %rsi;"							\
-	"push %rdi;"							\
-	"push %r8;"							\
-	"push %r9;"							\
-	"push %r10;"							\
-	"push %r11;"
+	"push %%rcx;"							\
+	"push %%rdx;"							\
+	"push %%rsi;"							\
+	"push %%rdi;"							\
+	"push %%r8;"							\
+	"push %%r9;"							\
+	"push %%r10;"							\
+	"push %%r11;"
 #define PV_RESTORE_ALL_CALLER_REGS					\
-	"pop %r11;"							\
-	"pop %r10;"							\
-	"pop %r9;"							\
-	"pop %r8;"							\
-	"pop %rdi;"							\
-	"pop %rsi;"							\
-	"pop %rdx;"							\
-	"pop %rcx;"
+	"pop %%r11;"							\
+	"pop %%r10;"							\
+	"pop %%r9;"							\
+	"pop %%r8;"							\
+	"pop %%rdi;"							\
+	"pop %%rsi;"							\
+	"pop %%rdx;"							\
+	"pop %%rcx;"
 
 /* We save some registers, but all of them, that's too much. We clobber all
  * caller saved registers but the argument parameter */
@@ -782,44 +798,55 @@ static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
  * call. The return value in rax/eax will not be saved, even for void
  * functions.
  */
+#define PV_THUNK_NAME(func) "__raw_callee_save_" #func
 #define PV_CALLEE_SAVE_REGS_THUNK(func)					\
-	extern typeof(func) __raw_callee_save_##func;			\
+	typeof(func) __raw_callee_save_##func __rap_hash;		\
 									\
-	asm(".pushsection .text;"					\
-	    ".globl __raw_callee_save_" #func " ; "			\
-	    "__raw_callee_save_" #func ": "				\
+	__naked __visible void __naked_callee_save_##func(void)		\
+	{								\
+	asm volatile(							\
+	    ".pushsection .text;"					\
+	    ".globl " PV_THUNK_NAME(func) ";"				\
+	    ".type " PV_THUNK_NAME(func) ", @function;"			\
+	    PV_THUNK_NAME(func) ":"					\
 	    PV_SAVE_ALL_CALLER_REGS					\
-	    "call " #func ";"						\
+	    PAX_DIRECT_CALL_HASH("%c0", PV_THUNK_NAME(func)) ";"	\
 	    PV_RESTORE_ALL_CALLER_REGS					\
-	    "ret;"							\
-	    ".popsection")
+	    PAX_RET(PV_THUNK_NAME(func))";"				\
+	    ".popsection" : : "i"(func));				\
+	unreachable(); \
+	}
 
 /* Get a reference to a callee-save function */
-#define PV_CALLEE_SAVE(func)						\
-	((struct paravirt_callee_save) { __raw_callee_save_##func })
+#define PV_CALLEE_SAVE(field, func)					\
+	((union paravirt_callee_save) { .field = __raw_callee_save_##func })
 
+#if defined(CONFIG_PAX_RAP) || defined(CONFIG_FTRACE)
+#define __PV_IS_CALLEE_SAVE(field, func) PV_CALLEE_SAVE(field, func)
+#else
 /* Promise that "func" already uses the right calling convention */
-#define __PV_IS_CALLEE_SAVE(func)			\
-	((struct paravirt_callee_save) { func })
+#define __PV_IS_CALLEE_SAVE(field, func)			\
+	((union paravirt_callee_save) { .field = func })
+#endif
 
 static inline notrace unsigned long arch_local_save_flags(void)
 {
-	return PVOP_CALLEE0(unsigned long, pv_irq_ops.save_fl);
+	return PVOP_CALLEE0(unsigned long, pv_irq_ops, save_fl);
 }
 
 static inline notrace void arch_local_irq_restore(unsigned long f)
 {
-	PVOP_VCALLEE1(pv_irq_ops.restore_fl, f);
+	PVOP_VCALLEE1(pv_irq_ops, restore_fl, f);
 }
 
 static inline notrace void arch_local_irq_disable(void)
 {
-	PVOP_VCALLEE0(pv_irq_ops.irq_disable);
+	PVOP_VCALLEE0(pv_irq_ops, irq_disable);
 }
 
 static inline notrace void arch_local_irq_enable(void)
 {
-	PVOP_VCALLEE0(pv_irq_ops.irq_enable);
+	PVOP_VCALLEE0(pv_irq_ops, irq_enable);
 }
 
 static inline notrace unsigned long arch_local_irq_save(void)
@@ -851,9 +878,9 @@ extern void default_banner(void);
 
 #else  /* __ASSEMBLY__ */
 
-#define _PVSITE(ptype, clobbers, ops, word, algn)	\
+#define _PVSITE(ptype, clobbers, word, algn, ...)\
 771:;						\
-	ops;					\
+	__VA_ARGS__;				\
 772:;						\
 	.pushsection .parainstructions,"a";	\
 	 .align	algn;				\
@@ -893,8 +920,10 @@ extern void default_banner(void);
 	COND_POP(set, CLBR_RAX, rax)
 
 #define PARA_PATCH(struct, off)        ((PARAVIRT_PATCH_##struct + (off)) / 8)
-#define PARA_SITE(ptype, clobbers, ops) _PVSITE(ptype, clobbers, ops, .quad, 8)
-#define PARA_INDIRECT(addr)	*addr(%rip)
+#define PARA_SITE(ptype, clobbers, ...) _PVSITE(ptype, clobbers, .quad, 8, __VA_ARGS__)
+#define PARA_INDIRECT(addr)	addr(%rip)
+#define PV_INDIRECT_CALL(ops, OPS, addr) pax_indirect_call PARA_INDIRECT(pv_##ops##_ops+PV_##OPS##_##addr), pv_##ops##_ops.##addr
+#define PV_INDIRECT_CALL_CALLEE_SAVE(ops, OPS, addr) pax_indirect_call PARA_INDIRECT(pv_##ops##_ops+PV_##OPS##_##addr), pv_##ops##_ops.##addr##.##addr
 #else
 #define PV_SAVE_REGS(set)			\
 	COND_PUSH(set, CLBR_EAX, eax);		\
@@ -908,41 +937,43 @@ extern void default_banner(void);
 	COND_POP(set, CLBR_EAX, eax)
 
 #define PARA_PATCH(struct, off)        ((PARAVIRT_PATCH_##struct + (off)) / 4)
-#define PARA_SITE(ptype, clobbers, ops) _PVSITE(ptype, clobbers, ops, .long, 4)
-#define PARA_INDIRECT(addr)	*%cs:addr
+#define PARA_SITE(ptype, clobbers, ...) _PVSITE(ptype, clobbers, .long, 4, __VA_ARGS__)
+#define PARA_INDIRECT(addr)	%ss:addr
+#define PV_INDIRECT_CALL(ops, OPS, addr) pax_indirect_call PARA_INDIRECT(pv_##ops##_ops+PV_##OPS##_##addr), pv_##ops##_ops.##addr
+#define PV_INDIRECT_CALL_CALLEE_SAVE(ops, OPS, addr) pax_indirect_call PARA_INDIRECT(pv_##ops##_ops+PV_##OPS##_##addr), pv_##ops##_ops.##addr##.##addr
 #endif
 
 #define INTERRUPT_RETURN						\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_iret), CLBR_NONE,	\
-		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_iret))
+		  jmp *PARA_INDIRECT(pv_cpu_ops+PV_CPU_iret))
 
 #define DISABLE_INTERRUPTS(clobbers)					\
 	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_irq_disable), clobbers, \
 		  PV_SAVE_REGS(clobbers | CLBR_CALLEE_SAVE);		\
-		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_irq_disable);	\
+		  PV_INDIRECT_CALL_CALLEE_SAVE(irq,IRQ,irq_disable);	\
 		  PV_RESTORE_REGS(clobbers | CLBR_CALLEE_SAVE);)
 
 #define ENABLE_INTERRUPTS(clobbers)					\
 	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_irq_enable), clobbers,	\
 		  PV_SAVE_REGS(clobbers | CLBR_CALLEE_SAVE);		\
-		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_irq_enable);	\
+		  PV_INDIRECT_CALL_CALLEE_SAVE(irq,IRQ,irq_enable);	\
 		  PV_RESTORE_REGS(clobbers | CLBR_CALLEE_SAVE);)
 
 #define USERGS_SYSRET32							\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_usergs_sysret32),	\
 		  CLBR_NONE,						\
-		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret32))
+		  jmp *PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret32))
 
 #ifdef CONFIG_X86_32
 #define GET_CR0_INTO_EAX				\
 	push %ecx; push %edx;				\
-	call PARA_INDIRECT(pv_cpu_ops+PV_CPU_read_cr0);	\
+	PV_INDIRECT_CALL(cpu,CPU,read_cr0);		\
 	pop %edx; pop %ecx
 
 #define ENABLE_INTERRUPTS_SYSEXIT					\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_irq_enable_sysexit),	\
 		  CLBR_NONE,						\
-		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_irq_enable_sysexit))
+		  jmp *PARA_INDIRECT(pv_cpu_ops+PV_CPU_irq_enable_sysexit))
 
 
 #else	/* !CONFIG_X86_32 */
@@ -964,21 +995,44 @@ extern void default_banner(void);
  */
 #define SWAPGS								\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_swapgs), CLBR_NONE,	\
-		  call PARA_INDIRECT(pv_cpu_ops+PV_CPU_swapgs)		\
+		  PV_INDIRECT_CALL(cpu,CPU,swapgs)			\
 		 )
 
 #define GET_CR2_INTO_RAX				\
-	call PARA_INDIRECT(pv_mmu_ops+PV_MMU_read_cr2)
+	PV_INDIRECT_CALL(mmu,MMU,read_cr2)
 
 #define PARAVIRT_ADJUST_EXCEPTION_FRAME					\
 	PARA_SITE(PARA_PATCH(pv_irq_ops, PV_IRQ_adjust_exception_frame), \
 		  CLBR_NONE,						\
-		  call PARA_INDIRECT(pv_irq_ops+PV_IRQ_adjust_exception_frame))
+		  PV_INDIRECT_CALL(irq,IRQ,adjust_exception_frame))
 
 #define USERGS_SYSRET64							\
 	PARA_SITE(PARA_PATCH(pv_cpu_ops, PV_CPU_usergs_sysret64),	\
 		  CLBR_NONE,						\
-		  jmp PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret64))
+		  jmp *PARA_INDIRECT(pv_cpu_ops+PV_CPU_usergs_sysret64))
+
+#define GET_CR0_INTO_RDI				\
+	ALTERNATIVE "mov %cr0, %rdi",			\
+	__stringify(PV_INDIRECT_CALL(cpu,CPU,read_cr0)),\
+	X86_FEATURE_XENPV ;				\
+	ALTERNATIVE "", "mov %rax, %rdi", X86_FEATURE_XENPV
+
+#define SET_RDI_INTO_CR0				\
+	ALTERNATIVE "mov %rdi, %cr0",			\
+	__stringify(PV_INDIRECT_CALL(cpu,CPU,write_cr0)),\
+	X86_FEATURE_XENPV
+
+#define GET_CR3_INTO_RDI				\
+	ALTERNATIVE "mov %cr3, %rdi",			\
+	__stringify(PV_INDIRECT_CALL(mmu,MMU,read_cr3)),\
+	X86_FEATURE_XENPV ;				\
+	ALTERNATIVE "", "mov %rax, %rdi", X86_FEATURE_XENPV
+
+#define SET_RDI_INTO_CR3				\
+	ALTERNATIVE "mov %rdi, %cr3",			\
+	__stringify(PV_INDIRECT_CALL(mmu,MMU,write_cr3)),\
+	X86_FEATURE_XENPV
+
 #endif	/* CONFIG_X86_32 */
 
 #endif /* __ASSEMBLY__ */

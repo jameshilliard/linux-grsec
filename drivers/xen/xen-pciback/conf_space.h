@@ -53,7 +53,7 @@ struct config_field {
 			conf_byte_write write;
 			conf_byte_read read;
 		} b;
-	} u;
+	} __no_const u;
 	struct list_head list;
 };
 

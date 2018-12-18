@@ -5,6 +5,8 @@
  * syscall compatibility layer.
  */
 
+#include <linux/types.h>
+
 #ifdef CONFIG_COMPAT
 
 #include <linux/stat.h>
@@ -45,13 +47,14 @@
 	COMPAT_SYSCALL_DEFINEx(6, _##name, __VA_ARGS__)
 
 #define COMPAT_SYSCALL_DEFINEx(x, name, ...)				\
-	asmlinkage long compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))\
-		__attribute__((alias(__stringify(compat_SyS##name))));  \
 	static inline long C_SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__));\
-	asmlinkage long compat_SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__));\
-	asmlinkage long compat_SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__))\
+	static inline asmlinkage long compat_SyS##name(__MAP(x,__SC_LONG,__VA_ARGS__))\
 	{								\
 		return C_SYSC##name(__MAP(x,__SC_DELOUSE,__VA_ARGS__));	\
+	}								\
+	asmlinkage long compat_sys##name(__MAP(x,__SC_DECL,__VA_ARGS__))\
+	{								\
+		return compat_SyS##name(__MAP(x,__SC_ARGS,__VA_ARGS__));\
 	}								\
 	static inline long C_SYSC##name(__MAP(x,__SC_DECL,__VA_ARGS__))
 
@@ -316,7 +319,7 @@ compat_sys_get_robust_list(int pid, compat_uptr_t __user *head_ptr,
 			   compat_size_t __user *len_ptr);
 
 asmlinkage long compat_sys_ipc(u32, int, int, u32, compat_uptr_t, u32);
-asmlinkage long compat_sys_shmat(int shmid, compat_uptr_t shmaddr, int shmflg);
+asmlinkage long compat_sys_shmat(int shmid, compat_uptr_t shmaddr, int shmflg) __intentional_overflow(0);
 asmlinkage long compat_sys_semctl(int semid, int semnum, int cmd, int arg);
 asmlinkage long compat_sys_msgsnd(int msqid, compat_uptr_t msgp,
 		compat_ssize_t msgsz, int msgflg);
@@ -325,7 +328,7 @@ asmlinkage long compat_sys_msgrcv(int msqid, compat_uptr_t msgp,
 long compat_sys_msgctl(int first, int second, void __user *uptr);
 long compat_sys_shmctl(int first, int second, void __user *uptr);
 long compat_sys_semtimedop(int semid, struct sembuf __user *tsems,
-		unsigned nsems, const struct compat_timespec __user *timeout);
+		compat_long_t nsems, const struct compat_timespec __user *timeout);
 asmlinkage long compat_sys_keyctl(u32 option,
 			      u32 arg2, u32 arg3, u32 arg4, u32 arg5);
 asmlinkage long compat_sys_ustat(unsigned dev, struct compat_ustat __user *u32);
@@ -439,7 +442,7 @@ extern int compat_ptrace_request(struct task_struct *child,
 extern long compat_arch_ptrace(struct task_struct *child, compat_long_t request,
 			       compat_ulong_t addr, compat_ulong_t data);
 asmlinkage long compat_sys_ptrace(compat_long_t request, compat_long_t pid,
-				  compat_long_t addr, compat_long_t data);
+				  compat_ulong_t addr, compat_ulong_t data);
 
 asmlinkage long compat_sys_lookup_dcookie(u32, u32, char __user *, compat_size_t);
 /*
@@ -713,9 +716,22 @@ asmlinkage long compat_sys_sched_rr_get_interval(compat_pid_t pid,
 
 asmlinkage long compat_sys_fanotify_mark(int, unsigned int, __u32, __u32,
 					    int, const char __user *);
+
+/*
+ * For most but not all architectures, "am I in a compat syscall?" and
+ * "am I a compat task?" are the same question.  For architectures on which
+ * they aren't the same question, arch code can override in_compat_syscall.
+ */
+
+#ifndef in_compat_syscall
+static inline bool in_compat_syscall(void) { return is_compat_task(); }
+#endif
+
 #else
 
 #define is_compat_task() (0)
+static inline bool in_compat_syscall(void) { return false; }
 
 #endif /* CONFIG_COMPAT */
+
 #endif /* _LINUX_COMPAT_H */

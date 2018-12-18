@@ -13,12 +13,14 @@
  */
 static inline void native_set_pte(pte_t *ptep , pte_t pte)
 {
-	*ptep = pte;
+	WRITE_ONCE(*ptep, pte);
 }
 
 static inline void native_set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
-	*pmdp = pmd;
+	pax_open_kernel();
+	WRITE_ONCE(*pmdp, pmd);
+	pax_close_kernel();
 }
 
 static inline void native_set_pte_atomic(pte_t *ptep, pte_t pte)
@@ -34,7 +36,7 @@ static inline void native_pmd_clear(pmd_t *pmdp)
 static inline void native_pte_clear(struct mm_struct *mm,
 				    unsigned long addr, pte_t *xp)
 {
-	*xp = native_make_pte(0);
+	WRITE_ONCE(*xp, native_make_pte(0));
 }
 
 #ifdef CONFIG_SMP

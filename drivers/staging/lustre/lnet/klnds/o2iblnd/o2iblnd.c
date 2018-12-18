@@ -1672,7 +1672,7 @@ static int kiblnd_init_poolset(kib_poolset_t *ps, int cpt,
 	ps->ps_node_init    = nd_init;
 	ps->ps_node_fini    = nd_fini;
 	ps->ps_pool_size    = size;
-	if (strlcpy(ps->ps_name, name, sizeof(ps->ps_name))
+	if (strlcpy_check(ps->ps_name, name, sizeof(ps->ps_name))
 	    >= sizeof(ps->ps_name))
 		return -E2BIG;
 	spin_lock_init(&ps->ps_lock);

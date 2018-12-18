@@ -75,7 +75,9 @@ static inline void rb_set_black(struct rb_node *rb)
 
 static inline struct rb_node *rb_red_parent(struct rb_node *red)
 {
-	return (struct rb_node *)red->__rb_parent_color;
+	struct rb_node *parent = (struct rb_node *)red->__rb_parent_color;
+	BUG_ON(parent && parent->rb_left != red && parent->rb_right != red);
+	return parent;
 }
 
 /*
@@ -412,7 +414,9 @@ static inline void dummy_copy(struct rb_node *old, struct rb_node *new) {}
 static inline void dummy_rotate(struct rb_node *old, struct rb_node *new) {}
 
 static const struct rb_augment_callbacks dummy_callbacks = {
-	dummy_propagate, dummy_copy, dummy_rotate
+	.propagate = dummy_propagate,
+	.copy = dummy_copy,
+	.rotate = dummy_rotate
 };
 
 void rb_insert_color(struct rb_node *node, struct rb_root *root)
@@ -473,7 +477,7 @@ struct rb_node *rb_last(const struct rb_root *root)
 }
 EXPORT_SYMBOL(rb_last);
 
-struct rb_node *rb_next(const struct rb_node *node)
+static struct rb_node *__rb_next(const struct rb_node *node, bool checked)
 {
 	struct rb_node *parent;
 
@@ -498,12 +502,28 @@ struct rb_node *rb_next(const struct rb_node *node)
 	 * parent, keep going up. First time it's a left-hand child of its
 	 * parent, said parent is our 'next' node.
 	 */
-	while ((parent = rb_parent(node)) && node == parent->rb_right)
-		node = parent;
+	if (checked) {
+		while ((parent = rb_parent(node)) && node == parent->rb_right)
+			node = parent;
+	} else {
+		while ((parent = rb_parent_unchecked(node)) && node == parent->rb_right)
+			node = parent;
+	}
 
 	return parent;
 }
+
+struct rb_node *rb_next(const struct rb_node *node)
+{
+	return __rb_next(node, true);
+}
 EXPORT_SYMBOL(rb_next);
+
+struct rb_node *rb_next_unchecked(const struct rb_node *node)
+{
+	return __rb_next(node, false);
+}
+EXPORT_SYMBOL(rb_next_unchecked);
 
 struct rb_node *rb_prev(const struct rb_node *node)
 {

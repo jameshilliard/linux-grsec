@@ -40,7 +40,7 @@ static const struct proto_ops rxrpc_rpc_ops;
 __be32 rxrpc_epoch;
 
 /* current debugging ID */
-atomic_t rxrpc_debug_id;
+atomic_unchecked_t rxrpc_debug_id;
 
 /* count of skbs currently in use */
 atomic_t rxrpc_n_skbs;
@@ -67,7 +67,7 @@ static void rxrpc_write_space(struct sock *sk)
 	if (rxrpc_writable(sk)) {
 		struct socket_wq *wq = rcu_dereference(sk->sk_wq);
 
-		if (wq_has_sleeper(wq))
+		if (skwq_has_sleeper(wq))
 			wake_up_interruptible(&wq->wait);
 		sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	}

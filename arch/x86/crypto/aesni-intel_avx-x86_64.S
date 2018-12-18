@@ -121,6 +121,7 @@
 
 #include <linux/linkage.h>
 #include <asm/inst.h>
+#include <asm/nospec-branch.h>
 
 .data
 .align 16

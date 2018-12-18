@@ -19,6 +19,13 @@
 #include <asm/bios_ebda.h>
 #include <asm/tlbflush.h>
 #include <asm/bootparam_utils.h>
+#include <asm/desc.h>
+
+/* boot GDT descriptor (later on used by CPU#0): */
+struct desc_ptr early_gdt_descr __read_only = {
+	.size = GDT_ENTRIES*8 - 1,
+	.address = (unsigned long)&cpu_gdt_table /* Overwritten for secondary CPUs */
+};
 
 static void __init i386_default_early_setup(void)
 {

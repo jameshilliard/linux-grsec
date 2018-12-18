@@ -71,7 +71,7 @@ EXPORT_SYMBOL(ip_vs_get_debug_level);
 
 static int ip_vs_net_id __read_mostly;
 /* netns cnt used for uniqueness */
-static atomic_t ipvs_netns_cnt = ATOMIC_INIT(0);
+static atomic_unchecked_t ipvs_netns_cnt = ATOMIC_INIT(0);
 
 /* ID used in ICMP lookups */
 #define icmp_id(icmph)          (((icmph)->un).echo.id)
@@ -118,6 +118,8 @@ ip_vs_in_stats(struct ip_vs_conn *cp, struct sk_buff *skb)
 		struct ip_vs_cpu_stats *s;
 		struct ip_vs_service *svc;
 
+		local_bh_disable();
+
 		s = this_cpu_ptr(dest->stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.inpkts++;
@@ -138,6 +140,8 @@ ip_vs_in_stats(struct ip_vs_conn *cp, struct sk_buff *skb)
 		s->cnt.inpkts++;
 		s->cnt.inbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
+
+		local_bh_enable();
 	}
 }
 
@@ -152,6 +156,8 @@ ip_vs_out_stats(struct ip_vs_conn *cp, struct sk_buff *skb)
 		struct ip_vs_cpu_stats *s;
 		struct ip_vs_service *svc;
 
+		local_bh_disable();
+
 		s = this_cpu_ptr(dest->stats.cpustats);
 		u64_stats_update_begin(&s->syncp);
 		s->cnt.outpkts++;
@@ -172,6 +178,8 @@ ip_vs_out_stats(struct ip_vs_conn *cp, struct sk_buff *skb)
 		s->cnt.outpkts++;
 		s->cnt.outbytes += skb->len;
 		u64_stats_update_end(&s->syncp);
+
+		local_bh_enable();
 	}
 }
 
@@ -181,6 +189,8 @@ ip_vs_conn_stats(struct ip_vs_conn *cp, struct ip_vs_service *svc)
 {
 	struct netns_ipvs *ipvs = svc->ipvs;
 	struct ip_vs_cpu_stats *s;
+
+	local_bh_disable();
 
 	s = this_cpu_ptr(cp->dest->stats.cpustats);
 	u64_stats_update_begin(&s->syncp);
@@ -196,6 +206,8 @@ ip_vs_conn_stats(struct ip_vs_conn *cp, struct ip_vs_service *svc)
 	u64_stats_update_begin(&s->syncp);
 	s->cnt.conns++;
 	u64_stats_update_end(&s->syncp);
+
+	local_bh_enable();
 }
 
 
@@ -611,7 +623,7 @@ int ip_vs_leave(struct ip_vs_service *svc, struct sk_buff *skb,
 		ret = cp->packet_xmit(skb, cp, pd->pp, iph);
 		/* do not touch skb anymore */
 
-		atomic_inc(&cp->in_pkts);
+		atomic_inc_unchecked(&cp->in_pkts);
 		ip_vs_conn_put(cp);
 		return ret;
 	}
@@ -1848,7 +1860,7 @@ ip_vs_in(struct netns_ipvs *ipvs, unsigned int hooknum, struct sk_buff *skb, int
 	if (cp->flags & IP_VS_CONN_F_ONE_PACKET)
 		pkts = sysctl_sync_threshold(ipvs);
 	else
-		pkts = atomic_add_return(1, &cp->in_pkts);
+		pkts = atomic_add_return_unchecked(1, &cp->in_pkts);
 
 	if (ipvs->sync_state & IP_VS_STATE_MASTER)
 		ip_vs_sync_conn(ipvs, cp, pkts);
@@ -2063,8 +2075,8 @@ static int __net_init __ip_vs_init(struct net *net)
 	ipvs->enable = 0;
 	ipvs->net = net;
 	/* Counters used for creating unique names */
-	ipvs->gen = atomic_read(&ipvs_netns_cnt);
-	atomic_inc(&ipvs_netns_cnt);
+	ipvs->gen = atomic_read_unchecked(&ipvs_netns_cnt);
+	atomic_inc_unchecked(&ipvs_netns_cnt);
 	net->ipvs = ipvs;
 
 	if (ip_vs_estimator_net_init(ipvs) < 0)

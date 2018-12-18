@@ -39,7 +39,7 @@ static unsigned int xstate_comp_offsets[sizeof(xfeatures_mask)*8];
  * Clear all of the X86_FEATURE_* bits that are unavailable
  * when the CPU has no XSAVE support.
  */
-void fpu__xstate_clear_all_cpu_caps(void)
+void __init fpu__xstate_clear_all_cpu_caps(void)
 {
 	setup_clear_cpu_cap(X86_FEATURE_XSAVE);
 	setup_clear_cpu_cap(X86_FEATURE_XSAVEOPT);
@@ -109,14 +109,14 @@ EXPORT_SYMBOL_GPL(cpu_has_xfeatures);
  */
 void fpstate_sanitize_xstate(struct fpu *fpu)
 {
-	struct fxregs_state *fx = &fpu->state.fxsave;
+	struct fxregs_state *fx = &fpu->_state->fxsave;
 	int feature_bit;
 	u64 xfeatures;
 
 	if (!use_xsaveopt())
 		return;
 
-	xfeatures = fpu->state.xsave.header.xfeatures;
+	xfeatures = fpu->_state->xsave.header.xfeatures;
 
 	/*
 	 * None of the feature bits are in init state. So nothing else
@@ -594,7 +594,7 @@ static int init_xstate_size(void)
  * We enabled the XSAVE hardware, but something went wrong and
  * we can not use it.  Disable it.
  */
-static void fpu__init_disable_system_xstate(void)
+static void __init fpu__init_disable_system_xstate(void)
 {
 	xfeatures_mask = 0;
 	cr4_clear_bits(X86_CR4_OSXSAVE);
@@ -747,5 +747,5 @@ const void *get_xsave_field_ptr(int xsave_state)
 	 */
 	fpu__save(fpu);
 
-	return get_xsave_addr(&fpu->state.xsave, xsave_state);
+	return get_xsave_addr(&fpu->_state->xsave, xsave_state);
 }

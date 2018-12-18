@@ -97,12 +97,53 @@ extern struct mm_struct *pgd_page_get_mm(struct page *page);
 
 #define arch_end_context_switch(prev)	do {} while(0)
 
+#define pax_open_kernel()	native_pax_open_kernel()
+#define pax_close_kernel()	native_pax_close_kernel()
 #endif	/* CONFIG_PARAVIRT */
+
+#define  __HAVE_ARCH_PAX_OPEN_KERNEL
+#define  __HAVE_ARCH_PAX_CLOSE_KERNEL
+
+#ifdef CONFIG_PAX_KERNEXEC
+static inline unsigned long native_pax_open_kernel(void)
+{
+	unsigned long cr0;
+
+	preempt_disable();
+	barrier();
+	cr0 = read_cr0() ^ X86_CR0_WP;
+	BUG_ON(cr0 & X86_CR0_WP);
+	write_cr0(cr0);
+	barrier();
+	return cr0 ^ X86_CR0_WP;
+}
+
+static inline unsigned long native_pax_close_kernel(void)
+{
+	unsigned long cr0;
+
+	barrier();
+	cr0 = read_cr0() ^ X86_CR0_WP;
+	BUG_ON(!(cr0 & X86_CR0_WP));
+	write_cr0(cr0);
+	barrier();
+	preempt_enable_no_resched();
+	return cr0 ^ X86_CR0_WP;
+}
+#else
+static inline unsigned long native_pax_open_kernel(void) { return 0; }
+static inline unsigned long native_pax_close_kernel(void) { return 0; }
+#endif
 
 /*
  * The following only work if pte_present() is true.
  * Undefined behaviour if not..
  */
+static inline int pte_user(pte_t pte)
+{
+	return pte_val(pte) & _PAGE_USER;
+}
+
 static inline int pte_dirty(pte_t pte)
 {
 	return pte_flags(pte) & _PAGE_DIRTY;
@@ -231,9 +272,29 @@ static inline pte_t pte_wrprotect(pte_t pte)
 	return pte_clear_flags(pte, _PAGE_RW);
 }
 
+static inline pte_t pte_mkread(pte_t pte)
+{
+	return __pte(pte_val(pte) | _PAGE_USER);
+}
+
 static inline pte_t pte_mkexec(pte_t pte)
 {
-	return pte_clear_flags(pte, _PAGE_NX);
+#ifdef CONFIG_X86_PAE
+	if (__supported_pte_mask & _PAGE_NX)
+		return pte_clear_flags(pte, _PAGE_NX);
+	else
+#endif
+		return pte_set_flags(pte, _PAGE_USER);
+}
+
+static inline pte_t pte_exprotect(pte_t pte)
+{
+#ifdef CONFIG_X86_PAE
+	if (__supported_pte_mask & _PAGE_NX)
+		return pte_set_flags(pte, _PAGE_NX);
+	else
+#endif
+		return pte_clear_flags(pte, _PAGE_USER);
 }
 
 static inline pte_t pte_mkdirty(pte_t pte)
@@ -457,7 +518,7 @@ static inline pgprot_t pgprot_modify(pgprot_t oldprot, pgprot_t newprot)
 
 #define canon_pgprot(p) __pgprot(massage_pgprot(p))
 
-static inline int is_new_memtype_allowed(u64 paddr, unsigned long size,
+static inline int is_new_memtype_allowed(u64 paddr, u64 size,
 					 enum page_cache_mode pcm,
 					 enum page_cache_mode new_pcm)
 {
@@ -500,6 +561,16 @@ pte_t *populate_extra_pte(unsigned long vaddr);
 #endif
 
 #ifndef __ASSEMBLY__
+
+#ifdef CONFIG_PAX_PER_CPU_PGD
+extern pgd_t cpu_pgd[NR_CPUS][4][PTRS_PER_PGD] __aligned(4 * PAGE_SIZE);
+enum cpu_pgd_type {kernel = 0, user = 2, uaccess = 3};
+static inline pgd_t *get_cpu_pgd(unsigned int cpu, enum cpu_pgd_type type)
+{
+	return cpu_pgd[cpu][type];
+}
+#endif
+
 #include <linux/mm_types.h>
 #include <linux/mmdebug.h>
 #include <linux/log2.h>
@@ -706,7 +777,7 @@ static inline pud_t *pud_offset(pgd_t *pgd, unsigned long address)
 
 static inline int pgd_bad(pgd_t pgd)
 {
-	pgdval_t ignore_flags = _PAGE_USER;
+	pgdval_t ignore_flags = _PAGE_USER | _PAGE_NX;
 	/*
 	 * We set NX on KAISER pgds that map userspace memory so
 	 * that userspace can not meaningfully use the kernel
@@ -739,7 +810,13 @@ static inline int pgd_none(pgd_t pgd)
  * pgd_offset() returns a (pgd_t *)
  * pgd_index() is used get the offset into the pgd page's array of pgd_t's;
  */
-#define pgd_offset(mm, address) ((mm)->pgd + pgd_index((address)))
+#define pgd_offset(mm, address) ((mm)->pgd + pgd_index(address))
+#define pgd_offset_pgd(pgd, address) (pgd + pgd_index((address)))
+
+#ifdef CONFIG_PAX_PER_CPU_PGD
+#define pgd_offset_cpu(cpu, type, address) (get_cpu_pgd(cpu, type) + pgd_index(address))
+#endif
+
 /*
  * a shortcut which implies the use of the kernel's pgd, instead
  * of a process's
@@ -749,6 +826,14 @@ static inline int pgd_none(pgd_t pgd)
 
 #define KERNEL_PGD_BOUNDARY	pgd_index(PAGE_OFFSET)
 #define KERNEL_PGD_PTRS		(PTRS_PER_PGD - KERNEL_PGD_BOUNDARY)
+
+#ifdef CONFIG_X86_32
+#define USER_PGD_PTRS		KERNEL_PGD_BOUNDARY
+#else
+#define TASK_SIZE_MAX_SHIFT CONFIG_TASK_SIZE_MAX_SHIFT
+#define USER_PGD_PTRS		(_AC(1,UL) << (TASK_SIZE_MAX_SHIFT - PGDIR_SHIFT))
+
+#endif
 
 #ifndef __ASSEMBLY__
 
@@ -918,6 +1003,7 @@ static inline void pmdp_set_wrprotect(struct mm_struct *mm,
  */
 static inline void clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
 {
+	pax_open_kernel();
 	memcpy(dst, src, count * sizeof(pgd_t));
 #ifdef CONFIG_PAGE_TABLE_ISOLATION
 	if (kaiser_enabled) {
@@ -927,6 +1013,7 @@ static inline void clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
 			count * sizeof(pgd_t));
 	}
 #endif
+	pax_close_kernel();
 }
 
 #define PTE_SHIFT ilog2(PTRS_PER_PTE)

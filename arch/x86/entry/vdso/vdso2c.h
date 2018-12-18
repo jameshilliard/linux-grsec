@@ -12,7 +12,7 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 	unsigned long load_size = -1;  /* Work around bogus warning */
 	unsigned long mapping_size;
 	ELF(Ehdr) *hdr = (ELF(Ehdr) *)raw_addr;
-	int i;
+	unsigned int i;
 	unsigned long j;
 	ELF(Shdr) *symtab_hdr = NULL, *strtab_hdr, *secstrings_hdr,
 		*alt_sec = NULL;
@@ -21,6 +21,9 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 	INT_BITS syms[NSYMS] = {};
 
 	ELF(Phdr) *pt = (ELF(Phdr) *)(raw_addr + GET_LE(&hdr->e_phoff));
+
+	if (hdr->e_type != ET_DYN)
+		fail("input is not a shared object\n");
 
 	/* Walk the segment table. */
 	for (i = 0; i < GET_LE(&hdr->e_phnum); i++) {
@@ -48,6 +51,9 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 
 	if (stripped_len < load_size)
 		fail("stripped input is too short\n");
+
+	if (!dyn)
+		fail("input has no PT_DYNAMIC section -- your toolchain is buggy\n");
 
 	/* Walk the dynamic table */
 	for (i = 0; dyn + i < dyn_end &&
@@ -83,7 +89,7 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 	for (i = 0;
 	     i < GET_LE(&symtab_hdr->sh_size) / GET_LE(&symtab_hdr->sh_entsize);
 	     i++) {
-		int k;
+		unsigned int k;
 		ELF(Sym) *sym = raw_addr + GET_LE(&symtab_hdr->sh_offset) +
 			GET_LE(&symtab_hdr->sh_entsize) * i;
 		const char *name = raw_addr + GET_LE(&strtab_hdr->sh_offset) +
@@ -140,7 +146,7 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 	fprintf(outfile, "#include <asm/vdso.h>\n");
 	fprintf(outfile, "\n");
 	fprintf(outfile,
-		"static unsigned char raw_data[%lu] __page_aligned_data = {",
+		"static unsigned char raw_data[%lu] __page_aligned_rodata = {",
 		mapping_size);
 	for (j = 0; j < stripped_len; j++) {
 		if (j % 10 == 0)
@@ -150,7 +156,7 @@ static void BITSFUNC(go)(void *raw_addr, size_t raw_len,
 	}
 	fprintf(outfile, "\n};\n\n");
 
-	fprintf(outfile, "static struct page *pages[%lu];\n\n",
+	fprintf(outfile, "static struct page *pages[%lu] __read_only;\n\n",
 		mapping_size / 4096);
 
 	fprintf(outfile, "const struct vdso_image %s = {\n", name);

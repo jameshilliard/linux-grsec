@@ -94,6 +94,7 @@ ENTRY(startup_32)
 	movl	%edx, %gs
 
 	movl	pa_tr_cr4, %eax
+	andl	$~X86_CR4_PCIDE, %eax
 	movl	%eax, %cr4		# Enable PAE mode
 
 	# Setup trampoline 4 level pagetables
@@ -107,7 +108,7 @@ ENTRY(startup_32)
 	wrmsr
 
 	# Enable paging and in turn activate Long Mode
-	movl	$(X86_CR0_PG | X86_CR0_WP | X86_CR0_PE), %eax
+	movl	$(X86_CR0_PG | X86_CR0_PE), %eax
 	movl	%eax, %cr0
 
 	/*
@@ -141,7 +142,7 @@ tr_gdt_end:
 
 	.bss
 	.balign	KAISER_KERNEL_PGD_ALIGNMENT
-GLOBAL(trampoline_pgd)		.space	PAGE_SIZE
+GLOBAL(trampoline_pgd)		.space	KAISER_KERNEL_PGD_ALIGNMENT
 
 	.balign	8
 GLOBAL(trampoline_header)

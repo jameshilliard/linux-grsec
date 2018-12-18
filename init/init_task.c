@@ -22,5 +22,9 @@ EXPORT_SYMBOL(init_task);
  * Initial thread structure. Alignment of this is handled by a special
  * linker map entry.
  */
+#ifdef CONFIG_X86
+union thread_union init_thread_union __init_task_data;
+#else
 union thread_union init_thread_union __init_task_data =
 	{ INIT_THREAD_INFO(init_task) };
+#endif

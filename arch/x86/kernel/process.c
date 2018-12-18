@@ -15,6 +15,7 @@
 #include <linux/dmi.h>
 #include <linux/utsname.h>
 #include <linux/stackprotector.h>
+#include <linux/kthread.h>
 #include <linux/tick.h>
 #include <linux/cpuidle.h>
 #include <trace/events/power.h>
@@ -32,6 +33,7 @@
 #include <asm/mce.h>
 #include <asm/vm86.h>
 #include <asm/spec-ctrl.h>
+#include <asm/switch_to.h>
 
 /*
  * per-CPU TSS segments. Threads are completely 'soft' on Linux,
@@ -40,7 +42,8 @@
  * section. Since TSS's are completely CPU-local, we want them
  * on exact cacheline boundaries, to eliminate cacheline ping-pong.
  */
-__visible DEFINE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(struct tss_struct, cpu_tss) = {
+struct tss_struct cpu_tss[NR_CPUS] __visible ____cacheline_internodealigned_in_smp = {
+	[0 ... NR_CPUS-1] = {
 	.x86_tss = {
 		.sp0 = TOP_OF_INIT_STACK,
 #ifdef CONFIG_X86_32
@@ -58,6 +61,7 @@ __visible DEFINE_PER_CPU_SHARED_ALIGNED_USER_MAPPED(struct tss_struct, cpu_tss) 
 	  */
 	.io_bitmap		= { [0 ... IO_BITMAP_LONGS] = ~0 },
 #endif
+}
 };
 EXPORT_PER_CPU_SYMBOL(cpu_tss);
 
@@ -78,18 +82,37 @@ void idle_notifier_unregister(struct notifier_block *n)
 EXPORT_SYMBOL_GPL(idle_notifier_unregister);
 #endif
 
+struct kmem_cache *fpregs_state_cachep;
+EXPORT_SYMBOL(fpregs_state_cachep);
+
+void __init arch_task_cache_init(void)
+{
+	/* create a slab on which task_structs can be allocated */
+	fpregs_state_cachep =
+		kmem_cache_create_usercopy("fpregs_state", xstate_size,
+			ARCH_MIN_TASKALIGN, SLAB_PANIC | SLAB_NOTRACK, 0, xstate_size, NULL);
+}
+
 /*
  * this gets called so that we can store lazy state into memory and copy the
  * current task into the new thread.
  */
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
-	memcpy(dst, src, arch_task_struct_size);
+	*dst = *src;
+	dst->thread.fpu._state = kmem_cache_alloc_node(fpregs_state_cachep, GFP_KERNEL, tsk_fork_get_node(src));
+	memcpy(dst->thread.fpu._state, src->thread.fpu._state, xstate_size);
 #ifdef CONFIG_VM86
 	dst->thread.vm86 = NULL;
 #endif
 
 	return fpu__copy(&dst->thread.fpu, &src->thread.fpu);
+}
+
+void arch_release_task_struct(struct task_struct *tsk)
+{
+	kmem_cache_free(fpregs_state_cachep, tsk->thread.fpu._state);
+	tsk->thread.fpu._state = NULL;
 }
 
 /*
@@ -103,7 +126,7 @@ void exit_thread(void)
 	struct fpu *fpu = &t->fpu;
 
 	if (bp) {
-		struct tss_struct *tss = &per_cpu(cpu_tss, get_cpu());
+		struct tss_struct *tss = cpu_tss + get_cpu();
 
 		t->io_bitmap_ptr = NULL;
 		clear_thread_flag(TIF_IO_BITMAP);
@@ -125,8 +148,14 @@ void flush_thread(void)
 {
 	struct task_struct *tsk = current;
 
+#if defined(CONFIG_X86_32) && !defined(CONFIG_CC_STACKPROTECTOR) && !defined(CONFIG_PAX_MEMORY_UDEREF)
+	loadsegment(gs, 0);
+#endif
 	flush_ptrace_hw_breakpoint(tsk);
 	memset(tsk->thread.tls_array, 0, sizeof(tsk->thread.tls_array));
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	memset(tsk->thread.tls_array_inverted, 0, sizeof(tsk->thread.tls_array_inverted));
+#endif
 
 	fpu__clear(&tsk->thread.fpu);
 }
@@ -407,7 +436,7 @@ static void __exit_idle(void)
 void exit_idle(void)
 {
 	/* idle loop has pid 0 */
-	if (current->pid)
+	if (task_pid_nr(current))
 		return;
 	__exit_idle();
 }
@@ -460,7 +489,7 @@ bool xen_set_default_idle(void)
 	return ret;
 }
 #endif
-void stop_this_cpu(void *dummy)
+__noreturn void stop_this_cpu(void *dummy)
 {
 	local_irq_disable();
 	/*
@@ -638,13 +667,6 @@ static int __init idle_setup(char *str)
 }
 early_param("idle", idle_setup);
 
-unsigned long arch_align_stack(unsigned long sp)
-{
-	if (!(current->personality & ADDR_NO_RANDOMIZE) && randomize_va_space)
-		sp -= get_random_int() % 8192;
-	return sp & ~0xf;
-}
-
 unsigned long arch_randomize_brk(struct mm_struct *mm)
 {
 	unsigned long range_end = mm->brk + 0x02000000;
@@ -676,9 +698,7 @@ unsigned long get_wchan(struct task_struct *p)
 	 * PADDING
 	 * ----------- top = topmax - TOP_OF_KERNEL_STACK_PADDING
 	 * stack
-	 * ----------- bottom = start + sizeof(thread_info)
-	 * thread_info
-	 * ----------- start
+	 * ----------- bottom = start
 	 *
 	 * The tasks stack pointer points at the location where the
 	 * framepointer is stored. The data on the stack is:
@@ -689,7 +709,7 @@ unsigned long get_wchan(struct task_struct *p)
 	 */
 	top = start + THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;
 	top -= 2 * sizeof(unsigned long);
-	bottom = start + sizeof(struct thread_info);
+	bottom = start;
 
 	sp = READ_ONCE(p->thread.sp);
 	if (sp < bottom || sp > top)
@@ -706,3 +726,36 @@ unsigned long get_wchan(struct task_struct *p)
 	} while (count++ < 16 && p->state != TASK_RUNNING);
 	return 0;
 }
+
+#ifdef CONFIG_PAX_RANDKSTACK
+void pax_randomize_kstack(struct pt_regs *regs)
+{
+	struct thread_struct *thread = &current->thread;
+	unsigned long time;
+
+	if (unlikely(!randomize_va_space))
+		return;
+
+	if (unlikely(v8086_mode(regs)))
+		return;
+
+	time = prandom_u32();
+
+	/* P4 seems to return a 0 LSB, ignore it */
+#ifdef CONFIG_MPENTIUM4
+	time &= 0x3EUL;
+	time <<= 2;
+#elif defined(CONFIG_X86_64)
+	time &= 0xFUL;
+	time <<= 4;
+#else
+	time &= 0x1FUL;
+	time <<= 3;
+#endif
+
+	thread->sp0 ^= time;
+	update_sp0(cpu_tss + smp_processor_id(), current);
+	this_cpu_write(cpu_current_top_of_stack, thread->sp0);
+	update_sp1(cpu_tss + smp_processor_id(), thread->sp0);
+}
+#endif

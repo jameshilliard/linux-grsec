@@ -403,14 +403,14 @@ void rds_ib_recv_refill(struct rds_connection *conn, int prefill, gfp_t gfp)
 			break;
 		}
 
-		/* XXX when can this fail? */
-		ret = ib_post_recv(ic->i_cm_id->qp, &recv->r_wr, &failed_wr);
-		rdsdebug("recv %p ibinc %p page %p addr %lu ret %d\n", recv,
+		rdsdebug("recv %p ibinc %p page %p addr %lu\n", recv,
 			 recv->r_ibinc, sg_page(&recv->r_frag->f_sg),
 			 (long) ib_sg_dma_address(
 				ic->i_cm_id->device,
-				&recv->r_frag->f_sg),
-			ret);
+				&recv->r_frag->f_sg));
+
+		/* XXX when can this fail? */
+		ret = ib_post_recv(ic->i_cm_id->qp, &recv->r_wr, &failed_wr);
 		if (ret) {
 			rds_ib_conn_error(conn, "recv post on "
 			       "%pI4 returned %d, disconnecting and "
@@ -623,7 +623,7 @@ static u64 rds_ib_get_ack(struct rds_ib_connection *ic)
 #else
 void rds_ib_set_ack(struct rds_ib_connection *ic, u64 seq, int ack_required)
 {
-	atomic64_set(&ic->i_ack_next, seq);
+	atomic64_set_unchecked(&ic->i_ack_next, seq);
 	if (ack_required) {
 		smp_mb__before_atomic();
 		set_bit(IB_ACK_REQUESTED, &ic->i_ack_flags);
@@ -635,7 +635,7 @@ static u64 rds_ib_get_ack(struct rds_ib_connection *ic)
 	clear_bit(IB_ACK_REQUESTED, &ic->i_ack_flags);
 	smp_mb__after_atomic();
 
-	return atomic64_read(&ic->i_ack_next);
+	return atomic64_read_unchecked(&ic->i_ack_next);
 }
 #endif
 

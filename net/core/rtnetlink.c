@@ -61,7 +61,7 @@ struct rtnl_link {
 	rtnl_doit_func		doit;
 	rtnl_dumpit_func	dumpit;
 	rtnl_calcit_func 	calcit;
-};
+} __no_const;
 
 static DEFINE_MUTEX(rtnl_mutex);
 
@@ -307,10 +307,13 @@ int __rtnl_link_register(struct rtnl_link_ops *ops)
 	 * to use the ops for creating device. So do not
 	 * fill up dellink as well. That disables rtnl_dellink.
 	 */
-	if (ops->setup && !ops->dellink)
-		ops->dellink = unregister_netdevice_queue;
+	if (ops->setup && !ops->dellink) {
+		pax_open_kernel();
+		const_cast(ops->dellink) = unregister_netdevice_queue;
+		pax_close_kernel();
+	}
 
-	list_add_tail(&ops->list, &link_ops);
+	pax_list_add_tail((struct list_head *)&ops->list, &link_ops);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(__rtnl_link_register);
@@ -357,7 +360,7 @@ void __rtnl_link_unregister(struct rtnl_link_ops *ops)
 	for_each_net(net) {
 		__rtnl_kill_links(net, ops);
 	}
-	list_del(&ops->list);
+	pax_list_del((struct list_head *)&ops->list);
 }
 EXPORT_SYMBOL_GPL(__rtnl_link_unregister);
 
@@ -1238,7 +1241,7 @@ static int rtnl_fill_ifinfo(struct sk_buff *skb, struct net_device *dev,
 	    (dev->ifalias &&
 	     nla_put_string(skb, IFLA_IFALIAS, dev->ifalias)) ||
 	    nla_put_u32(skb, IFLA_CARRIER_CHANGES,
-			atomic_read(&dev->carrier_changes)) ||
+			atomic_read_unchecked(&dev->carrier_changes)) ||
 	    nla_put_u8(skb, IFLA_PROTO_DOWN, dev->proto_down))
 		goto nla_put_failure;
 
@@ -2944,9 +2947,13 @@ static int rtnl_fdb_dump(struct sk_buff *skb, struct netlink_callback *cb)
 	int brport_idx = 0;
 	int br_idx = 0;
 	int idx = 0;
+	int err;
 
-	if (nlmsg_parse(cb->nlh, sizeof(struct ifinfomsg), tb, IFLA_MAX,
-			ifla_policy) == 0) {
+	err = nlmsg_parse(cb->nlh, sizeof(struct ifinfomsg), tb,
+			  IFLA_MAX, ifla_policy);
+	if (err < 0) {
+		return -EINVAL;
+	} else if (err == 0) {
 		if (tb[IFLA_MASTER])
 			br_idx = nla_get_u32(tb[IFLA_MASTER]);
 	}
@@ -3416,7 +3423,7 @@ static int rtnetlink_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 		__rtnl_unlock();
 		rtnl = net->rtnl;
 		{
-			struct netlink_dump_control c = {
+			netlink_dump_control_no_const c = {
 				.dump		= dumpit,
 				.min_dump_alloc	= min_dump_alloc,
 			};

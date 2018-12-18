@@ -233,7 +233,7 @@ void dev_coredumpm(struct device *dev, struct module *owner,
 				   const void *data, size_t datalen),
 		   void (*free)(const void *data))
 {
-	static atomic_t devcd_count = ATOMIC_INIT(0);
+	static atomic_unchecked_t devcd_count = ATOMIC_INIT(0);
 	struct devcd_entry *devcd;
 	struct device *existing;
 
@@ -264,7 +264,7 @@ void dev_coredumpm(struct device *dev, struct module *owner,
 	device_initialize(&devcd->devcd_dev);
 
 	dev_set_name(&devcd->devcd_dev, "devcd%d",
-		     atomic_inc_return(&devcd_count));
+		     atomic_inc_return_unchecked(&devcd_count));
 	devcd->devcd_dev.class = &devcd_class;
 
 	if (device_add(&devcd->devcd_dev))

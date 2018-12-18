@@ -3,6 +3,47 @@
 
 #include <generated/autoconf.h>
 
+#ifndef __ASSEMBLY__
+extern struct missing_include_for_attribute __do_const;
+extern struct missing_include_for_attribute __intentional_overflow;
+extern struct missing_include_for_attribute __latent_entropy;
+extern struct missing_include_for_attribute __mutable_const;
+extern struct missing_include_for_attribute __nocapture;
+extern struct missing_include_for_attribute __no_const;
+extern struct missing_include_for_attribute __no_randomize_layout;
+extern struct missing_include_for_attribute __randomize_layout;
+extern struct missing_include_for_attribute __rap_hash;
+extern struct missing_include_for_attribute __size_overflow;
+extern struct missing_include_for_attribute __skip_size_overflow;
+extern struct missing_include_for_attribute __turn_off_size_overflow;
+extern struct missing_include_for_attribute __unverified_nocapture;
+
+extern struct missing_include_for_attribute __aligned;
+extern struct missing_include_for_attribute __alloc_size;
+extern struct missing_include_for_attribute __assume_aligned;
+extern struct missing_include_for_attribute __attribute_const__;
+extern struct missing_include_for_attribute __bos;
+extern struct missing_include_for_attribute __bos0;
+extern struct missing_include_for_attribute __bos1;
+extern struct missing_include_for_attribute ____cacheline_aligned;
+extern struct missing_include_for_attribute ____cacheline_aligned_in_smp;
+extern struct missing_include_for_attribute ____cacheline_internodealigned_in_smp;
+extern struct missing_include_for_attribute __malloc;
+extern struct missing_include_for_attribute __must_check;
+extern struct missing_include_for_attribute __naked;
+extern struct missing_include_for_attribute __noclone;
+extern struct missing_include_for_attribute __noreturn;
+extern struct missing_include_for_attribute __no_sanitize_address;
+extern struct missing_include_for_attribute __nostackprotector;
+extern struct missing_include_for_attribute __packed;
+extern struct missing_include_for_attribute __printf;
+extern struct missing_include_for_attribute __pure;
+extern struct missing_include_for_attribute __scanf;
+extern struct missing_include_for_attribute __used;
+extern struct missing_include_for_attribute __visible;
+extern struct missing_include_for_attribute __weak;
+#endif
+
 /*
  * Helper macros to use CONFIG_ options in C/CPP expressions. Note that
  * these only work with boolean and tristate options.

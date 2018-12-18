@@ -25,6 +25,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .file "serpent-sse2-i586-asm_32.S"
 .text

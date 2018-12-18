@@ -80,7 +80,7 @@ typedef void (sctp_timer_event_t) (unsigned long);
 typedef struct {
 	sctp_state_fn_t *fn;
 	const char *name;
-} sctp_sm_table_entry_t;
+} __do_const sctp_sm_table_entry_t;
 
 /* A naming convention of "sctp_sf_xxx" applies to all the state functions
  * currently in use.
@@ -292,7 +292,7 @@ __u32 sctp_generate_tag(const struct sctp_endpoint *);
 __u32 sctp_generate_tsn(const struct sctp_endpoint *);
 
 /* Extern declarations for major data structures.  */
-extern sctp_timer_event_t *sctp_timer_events[SCTP_NUM_TIMEOUT_TYPES];
+extern sctp_timer_event_t * const sctp_timer_events[SCTP_NUM_TIMEOUT_TYPES];
 
 
 /* Get the size of a DATA chunk payload. */
@@ -382,7 +382,7 @@ enum {
 	ADDIP_SERIAL_SIGN_BIT = (1<<31)
 };
 
-static inline int ADDIP_SERIAL_gte(__u16 s, __u16 t)
+static inline int ADDIP_SERIAL_gte(__u32 s, __u32 t)
 {
 	return ((s) == (t)) || (((t) - (s)) & ADDIP_SERIAL_SIGN_BIT);
 }

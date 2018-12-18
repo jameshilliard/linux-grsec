@@ -17,6 +17,8 @@
 #include "mmu.h"
 #include "pmu.h"
 
+static DEFINE_PER_CPU(u64, spec_ctrl);
+
 static void xen_pv_pre_suspend(void)
 {
 	xen_mm_pin_all();

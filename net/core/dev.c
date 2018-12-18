@@ -1794,7 +1794,7 @@ int __dev_forward_skb(struct net_device *dev, struct sk_buff *skb)
 {
 	if (skb_orphan_frags(skb, GFP_ATOMIC) ||
 	    unlikely(!is_skb_forwardable(dev, skb))) {
-		atomic_long_inc(&dev->rx_dropped);
+		atomic_long_inc_unchecked(&dev->rx_dropped);
 		kfree_skb(skb);
 		return NET_RX_DROP;
 	}
@@ -3250,7 +3250,7 @@ recursion_alert:
 drop:
 	rcu_read_unlock_bh();
 
-	atomic_long_inc(&dev->tx_dropped);
+	atomic_long_inc_unchecked(&dev->tx_dropped);
 	kfree_skb_list(skb);
 	return rc;
 out:
@@ -3602,7 +3602,7 @@ drop:
 
 	local_irq_restore(flags);
 
-	atomic_long_inc(&skb->dev->rx_dropped);
+	atomic_long_inc_unchecked(&skb->dev->rx_dropped);
 	kfree_skb(skb);
 	return NET_RX_DROP;
 }
@@ -3679,7 +3679,7 @@ int netif_rx_ni(struct sk_buff *skb)
 }
 EXPORT_SYMBOL(netif_rx_ni);
 
-static void net_tx_action(struct softirq_action *h)
+static __latent_entropy void net_tx_action(void)
 {
 	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
 
@@ -4041,7 +4041,7 @@ ncls:
 			ret = pt_prev->func(skb, skb->dev, pt_prev, orig_dev);
 	} else {
 drop:
-		atomic_long_inc(&skb->dev->rx_dropped);
+		atomic_long_inc_unchecked(&skb->dev->rx_dropped);
 		kfree_skb(skb);
 		/* Jamal, now you will not able to escape explaining
 		 * me how you were going to use this. :-)
@@ -4429,6 +4429,7 @@ EXPORT_SYMBOL(gro_find_complete_by_type);
 static void napi_skb_free_stolen_head(struct sk_buff *skb)
 {
 	skb_dst_drop(skb);
+	secpath_reset(skb);
 	kmem_cache_free(skbuff_head_cache, skb);
 }
 
@@ -4484,6 +4485,7 @@ static void napi_reuse_skb(struct napi_struct *napi, struct sk_buff *skb)
 	skb->encapsulation = 0;
 	skb_shinfo(skb)->gso_type = 0;
 	skb->truesize = SKB_TRUESIZE(skb_end_offset(skb));
+	secpath_reset(skb);
 
 	napi->skb = skb;
 }
@@ -4947,7 +4949,7 @@ out_unlock:
 	return work;
 }
 
-static void net_rx_action(struct softirq_action *h)
+static __latent_entropy void net_rx_action(void)
 {
 	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
 	unsigned long time_limit = jiffies + 2;
@@ -7115,8 +7117,8 @@ struct rtnl_link_stats64 *dev_get_stats(struct net_device *dev,
 	} else {
 		netdev_stats_to_stats64(storage, &dev->stats);
 	}
-	storage->rx_dropped += (unsigned long)atomic_long_read(&dev->rx_dropped);
-	storage->tx_dropped += (unsigned long)atomic_long_read(&dev->tx_dropped);
+	storage->rx_dropped += (unsigned long)atomic_long_read_unchecked(&dev->rx_dropped);
+	storage->tx_dropped += (unsigned long)atomic_long_read_unchecked(&dev->tx_dropped);
 	return storage;
 }
 EXPORT_SYMBOL(dev_get_stats);
@@ -7737,7 +7739,7 @@ static void __net_exit netdev_exit(struct net *net)
 	kfree(net->dev_index_head);
 }
 
-static struct pernet_operations __net_initdata netdev_net_ops = {
+static struct pernet_operations __net_initconst netdev_net_ops = {
 	.init = netdev_init,
 	.exit = netdev_exit,
 };
@@ -7837,7 +7839,7 @@ static void __net_exit default_device_exit_batch(struct list_head *net_list)
 	rtnl_unlock();
 }
 
-static struct pernet_operations __net_initdata default_device_ops = {
+static struct pernet_operations __net_initconst default_device_ops = {
 	.exit = default_device_exit,
 	.exit_batch = default_device_exit_batch,
 };

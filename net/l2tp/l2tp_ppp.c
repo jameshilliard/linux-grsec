@@ -454,11 +454,10 @@ static void pppol2tp_session_close(struct l2tp_session *session)
 
 	BUG_ON(session->magic != L2TP_SESSION_MAGIC);
 
-	if (sock) {
+	if (sock)
 		inet_shutdown(sock, 2);
-		/* Don't let the session go away before our socket does */
-		l2tp_session_inc_refcount(session);
-	}
+	/* Don't let the session go away before our socket does */
+	l2tp_session_inc_refcount(session);
 }
 
 /* Really kill the session socket. (Called from sock_put() if
@@ -720,6 +719,7 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 		 * headers.
 		 */
 		cfg.mtu = cfg.mru = 1500 - PPPOL2TP_HEADER_OVERHEAD;
+		cfg.pw_type = L2TP_PWTYPE_PPP;
 
 		/* Allocate and initialize a new session context. */
 		session = l2tp_session_create(sizeof(struct pppol2tp_session),
@@ -730,6 +730,11 @@ static int pppol2tp_connect(struct socket *sock, struct sockaddr *uservaddr,
 			goto end;
 		}
 	} else {
+		if (session->pwtype != L2TP_PWTYPE_PPP) {
+			error = -EPROTOTYPE;
+			goto end;
+		}
+
 		ps = l2tp_session_priv(session);
 		error = -EEXIST;
 		if (ps->sock != NULL)
@@ -1408,8 +1413,6 @@ static int pppol2tp_setsockopt(struct socket *sock, int level, int optname,
 	} else
 		err = pppol2tp_session_setsockopt(sk, session, optname, val);
 
-	err = 0;
-
 end_put_sess:
 	sock_put(sk);
 end:
@@ -1532,8 +1535,13 @@ static int pppol2tp_getsockopt(struct socket *sock, int level, int optname,
 
 		err = pppol2tp_tunnel_getsockopt(sk, tunnel, optname, &val);
 		sock_put(ps->tunnel_sock);
-	} else
+		if (err)
+			goto end_put_sess;
+	} else {
 		err = pppol2tp_session_getsockopt(sk, session, optname, &val);
+		if (err)
+			goto end_put_sess;
+	}
 
 	err = -EFAULT;
 	if (put_user(len, optlen))

@@ -52,6 +52,7 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
 	__phys_addr_symbol(__phys_reloc_hide((unsigned long)(x)))
 
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
+#define __early_va(x)		((void *)((unsigned long)(x)+__START_KERNEL_map - phys_base))
 
 #define __boot_va(x)		__va(x)
 #define __boot_pa(x)		__pa(x)
@@ -60,10 +61,20 @@ static inline void copy_user_page(void *to, void *from, unsigned long vaddr,
  * virt_to_page(kaddr) returns a valid pointer if and only if
  * virt_addr_valid(kaddr) returns true.
  */
-#define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 #define pfn_to_kaddr(pfn)      __va((pfn) << PAGE_SHIFT)
 extern bool __virt_addr_valid(unsigned long kaddr);
 #define virt_addr_valid(kaddr)	__virt_addr_valid((unsigned long) (kaddr))
+
+#ifdef CONFIG_GRKERNSEC_KSTACKOVERFLOW
+#define virt_to_page(kaddr)	\
+	({ \
+		const void *__kaddr = (const void *)(kaddr); \
+		BUG_ON(!virt_addr_valid(__kaddr)); \
+		pfn_to_page(__pa(__kaddr) >> PAGE_SHIFT); \
+	})
+#else
+#define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
+#endif
 
 #endif	/* __ASSEMBLY__ */
 

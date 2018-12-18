@@ -875,7 +875,7 @@ tda998x_encoder_mode_fixup(struct drm_encoder *encoder,
 	return true;
 }
 
-static int tda998x_connector_mode_valid(struct drm_connector *connector,
+static enum drm_mode_status tda998x_connector_mode_valid(struct drm_connector *connector,
 					struct drm_display_mode *mode)
 {
 	if (mode->clock > 150000)

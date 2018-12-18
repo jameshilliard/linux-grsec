@@ -74,24 +74,28 @@ static void cpu_stop_signal_done(struct cpu_stop_done *done, bool executed)
 }
 
 static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
-					struct cpu_stop_work *work)
+					struct cpu_stop_work *work,
+					struct wake_q_head *wakeq)
 {
 	list_add_tail(&work->list, &stopper->works);
-	wake_up_process(stopper->thread);
+	wake_q_add(wakeq, stopper->thread);
 }
 
 /* queue @work to @stopper.  if offline, @work is completed immediately */
 static void cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 {
 	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
+	WAKE_Q(wakeq);
 	unsigned long flags;
 
 	spin_lock_irqsave(&stopper->lock, flags);
 	if (stopper->enabled)
-		__cpu_stop_queue_work(stopper, work);
+		__cpu_stop_queue_work(stopper, work, &wakeq);
 	else
 		cpu_stop_signal_done(work->done, false);
 	spin_unlock_irqrestore(&stopper->lock, flags);
+
+	wake_up_q(&wakeq);
 }
 
 /**
@@ -221,6 +225,7 @@ static int cpu_stop_queue_two_works(int cpu1, struct cpu_stop_work *work1,
 {
 	struct cpu_stopper *stopper1 = per_cpu_ptr(&cpu_stopper, cpu1);
 	struct cpu_stopper *stopper2 = per_cpu_ptr(&cpu_stopper, cpu2);
+	WAKE_Q(wakeq);
 	int err;
 
 	lg_double_lock(&stop_cpus_lock, cpu1, cpu2);
@@ -232,12 +237,26 @@ static int cpu_stop_queue_two_works(int cpu1, struct cpu_stop_work *work1,
 		goto unlock;
 
 	err = 0;
-	__cpu_stop_queue_work(stopper1, work1);
-	__cpu_stop_queue_work(stopper2, work2);
+	__cpu_stop_queue_work(stopper1, work1, &wakeq);
+	__cpu_stop_queue_work(stopper2, work2, &wakeq);
+	/*
+	 * The waking up of stopper threads has to happen
+	 * in the same scheduling context as the queueing.
+	 * Otherwise, there is a possibility of one of the
+	 * above stoppers being woken up by another CPU,
+	 * and preempting us. This will cause us to n ot
+	 * wake up the other stopper forever.
+	 */
+	preempt_disable();
 unlock:
 	spin_unlock(&stopper2->lock);
 	spin_unlock_irq(&stopper1->lock);
 	lg_double_unlock(&stop_cpus_lock, cpu1, cpu2);
+
+	if (!err) {
+		wake_up_q(&wakeq);
+		preempt_enable();
+	}
 
 	return err;
 }
@@ -503,7 +522,7 @@ void stop_machine_unpark(int cpu)
 	kthread_unpark(stopper->thread);
 }
 
-static struct smp_hotplug_thread cpu_stop_threads = {
+static struct smp_hotplug_thread cpu_stop_threads __read_only = {
 	.store			= &cpu_stopper.thread,
 	.thread_should_run	= cpu_stop_should_run,
 	.thread_fn		= cpu_stopper_thread,

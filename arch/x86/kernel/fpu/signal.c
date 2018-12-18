@@ -54,7 +54,7 @@ static inline int check_for_xstate(struct fxregs_state __user *buf,
 static inline int save_fsave_header(struct task_struct *tsk, void __user *buf)
 {
 	if (use_fxsr()) {
-		struct xregs_state *xsave = &tsk->thread.fpu.state.xsave;
+		struct xregs_state *xsave = &tsk->thread.fpu._state->xsave;
 		struct user_i387_ia32_struct env;
 		struct _fpstate_32 __user *fp = buf;
 
@@ -83,18 +83,18 @@ static inline int save_xstate_epilog(void __user *buf, int ia32_frame)
 
 	/* Setup the bytes not touched by the [f]xsave and reserved for SW. */
 	sw_bytes = ia32_frame ? &fx_sw_reserved_ia32 : &fx_sw_reserved;
-	err = __copy_to_user(&x->i387.sw_reserved, sw_bytes, sizeof(*sw_bytes));
+	err = __copy_to_user(x->i387.sw_reserved, sw_bytes, sizeof(*sw_bytes));
 
 	if (!use_xsave())
 		return err;
 
-	err |= __put_user(FP_XSTATE_MAGIC2, (__u32 *)(buf + xstate_size));
+	err |= __put_user(FP_XSTATE_MAGIC2, (__u32 __user *)(buf + xstate_size));
 
 	/*
 	 * Read the xfeatures which we copied (directly from the cpu or
 	 * from the state in task struct) to the user buffers.
 	 */
-	err |= __get_user(xfeatures, (__u32 *)&x->header.xfeatures);
+	err |= __get_user(xfeatures, (__u32 __user *)&x->header.xfeatures);
 
 	/*
 	 * For legacy compatible, we always set FP/SSE bits in the bit
@@ -109,7 +109,7 @@ static inline int save_xstate_epilog(void __user *buf, int ia32_frame)
 	 */
 	xfeatures |= XFEATURE_MASK_FPSSE;
 
-	err |= __put_user(xfeatures, (__u32 *)&x->header.xfeatures);
+	err |= __put_user(xfeatures, (__u32 __user *)&x->header.xfeatures);
 
 	return err;
 }
@@ -152,7 +152,7 @@ static inline int copy_fpregs_to_sigframe(struct xregs_state __user *buf)
  */
 int copy_fpstate_to_sigframe(void __user *buf, void __user *buf_fx, int size)
 {
-	struct xregs_state *xsave = &current->thread.fpu.state.xsave;
+	struct xregs_state *xsave = &current->thread.fpu._state->xsave;
 	struct task_struct *tsk = current;
 	int ia32_fxstate = (buf != buf_fx);
 
@@ -195,7 +195,7 @@ sanitize_restored_xstate(struct task_struct *tsk,
 			 struct user_i387_ia32_struct *ia32_env,
 			 u64 xfeatures, int fx_only)
 {
-	struct xregs_state *xsave = &tsk->thread.fpu.state.xsave;
+	struct xregs_state *xsave = &tsk->thread.fpu._state->xsave;
 	struct xstate_header *header = &xsave->header;
 
 	if (use_xsave()) {
@@ -308,18 +308,18 @@ static int __fpu__restore_sig(void __user *buf, void __user *buf_fx, int size)
 		 */
 		fpu__drop(fpu);
 
-		if (__copy_from_user(&fpu->state.xsave, buf_fx, state_size) ||
+		if (__copy_from_user(&fpu->_state->xsave, buf_fx, state_size) ||
 		    __copy_from_user(&env, buf, sizeof(env)) ||
 		    (state_size > offsetof(struct xregs_state, header) &&
-		     fpu->state.xsave.header.xcomp_bv)) {
-			fpstate_init(&fpu->state);
+		     fpu->_state->xsave.header.xcomp_bv)) {
+			fpstate_init(fpu->_state);
 			err = -1;
 		} else {
 			sanitize_restored_xstate(tsk, &env, xfeatures, fx_only);
 		}
 
-		fpu->fpstate_active = 1;
 		preempt_disable();
+		fpu->fpstate_active = 1;
 		fpu__restore(fpu);
 		preempt_enable();
 

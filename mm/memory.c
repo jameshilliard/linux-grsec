@@ -406,6 +406,7 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 		free_pte_range(tlb, pmd, addr);
 	} while (pmd++, addr = next, addr != end);
 
+#if !defined(CONFIG_X86_32) || !defined(CONFIG_PAX_PER_CPU_PGD)
 	start &= PUD_MASK;
 	if (start < floor)
 		return;
@@ -421,6 +422,7 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pud_clear(pud);
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
+#endif
 }
 
 static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
@@ -440,6 +442,7 @@ static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
 	} while (pud++, addr = next, addr != end);
 
+#if !defined(CONFIG_X86_64) || !defined(CONFIG_PAX_PER_CPU_PGD)
 	start &= PGDIR_MASK;
 	if (start < floor)
 		return;
@@ -454,6 +457,8 @@ static inline void free_pud_range(struct mmu_gather *tlb, pgd_t *pgd,
 	pud = pud_offset(pgd, start);
 	pgd_clear(pgd);
 	pud_free_tlb(tlb, pud, start);
+#endif
+
 }
 
 /*
@@ -682,7 +687,7 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
 	/*
 	 * Choose text because data symbols depend on CONFIG_KALLSYMS_ALL=y
 	 */
-	pr_alert("file:%pD fault:%pf mmap:%pf readpage:%pf\n",
+	pr_alert("file:%pD fault:%pX mmap:%pX readpage:%pX\n",
 		 vma->vm_file,
 		 vma->vm_ops ? vma->vm_ops->fault : NULL,
 		 vma->vm_file ? vma->vm_file->f_op->mmap : NULL,
@@ -1496,6 +1501,10 @@ static int insert_page(struct vm_area_struct *vma, unsigned long addr,
 	page_add_file_rmap(page);
 	set_pte_at(mm, addr, pte, mk_pte(page, prot));
 
+#ifdef CONFIG_PAX_SEGMEXEC
+	pax_mirror_file_pte(vma, addr, page, ptl);
+#endif
+
 	retval = 0;
 	pte_unmap_unlock(pte, ptl);
 	return retval;
@@ -1540,9 +1549,21 @@ int vm_insert_page(struct vm_area_struct *vma, unsigned long addr,
 	if (!page_count(page))
 		return -EINVAL;
 	if (!(vma->vm_flags & VM_MIXEDMAP)) {
+
+#ifdef CONFIG_PAX_SEGMEXEC
+		struct vm_area_struct *vma_m;
+#endif
+
 		BUG_ON(down_read_trylock(&vma->vm_mm->mmap_sem));
 		BUG_ON(vma->vm_flags & VM_PFNMAP);
 		vma->vm_flags |= VM_MIXEDMAP;
+
+#ifdef CONFIG_PAX_SEGMEXEC
+		vma_m = pax_find_mirror_vma(vma);
+		if (vma_m)
+			vma_m->vm_flags |= VM_MIXEDMAP;
+#endif
+
 	}
 	return insert_page(vma, addr, page, vma->vm_page_prot);
 }
@@ -1651,6 +1672,7 @@ int vm_insert_mixed(struct vm_area_struct *vma, unsigned long addr,
 	pgprot_t pgprot = vma->vm_page_prot;
 
 	BUG_ON(!(vma->vm_flags & VM_MIXEDMAP));
+	BUG_ON(vma->vm_mirror);
 
 	if (addr < vma->vm_start || addr >= vma->vm_end)
 		return -EFAULT;
@@ -1912,7 +1934,9 @@ static int apply_to_pmd_range(struct mm_struct *mm, pud_t *pud,
 
 	BUG_ON(pud_huge(*pud));
 
-	pmd = pmd_alloc(mm, pud, addr);
+	pmd = (mm == &init_mm) ?
+		pmd_alloc_kernel(mm, pud, addr) :
+		pmd_alloc(mm, pud, addr);
 	if (!pmd)
 		return -ENOMEM;
 	do {
@@ -1932,7 +1956,9 @@ static int apply_to_pud_range(struct mm_struct *mm, pgd_t *pgd,
 	unsigned long next;
 	int err;
 
-	pud = pud_alloc(mm, pgd, addr);
+	pud = (mm == &init_mm) ?
+		pud_alloc_kernel(mm, pgd, addr) :
+		pud_alloc(mm, pgd, addr);
 	if (!pud)
 		return -ENOMEM;
 	do {
@@ -2128,6 +2154,192 @@ static inline int wp_page_reuse(struct mm_struct *mm,
 	return VM_FAULT_WRITE;
 }
 
+#ifdef CONFIG_PAX_SEGMEXEC
+static void pax_unmap_mirror_pte(struct vm_area_struct *vma, unsigned long address, pmd_t *pmd)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	spinlock_t *ptl;
+	pte_t *pte, entry;
+
+	pte = pte_offset_map_lock(mm, pmd, address, &ptl);
+	entry = *pte;
+	if (pte_none(entry))
+		;
+	else if (!pte_present(entry)) {
+		swp_entry_t swapentry;
+
+		swapentry = pte_to_swp_entry(entry);
+		if (!non_swap_entry(swapentry))
+			dec_mm_counter_fast(mm, MM_SWAPENTS);
+		else if (is_migration_entry(swapentry)) {
+			if (PageAnon(migration_entry_to_page(swapentry)))
+				dec_mm_counter_fast(mm, MM_ANONPAGES);
+			else
+				dec_mm_counter_fast(mm, MM_FILEPAGES);
+		}
+		free_swap_and_cache(swapentry);
+		pte_clear_not_present_full(mm, address, pte, 0);
+	} else {
+		struct page *page;
+
+		flush_cache_page(vma, address, pte_pfn(entry));
+		entry = ptep_clear_flush(vma, address, pte);
+		BUG_ON(pte_dirty(entry));
+		page = vm_normal_page(vma, address, entry);
+		if (page) {
+			update_hiwater_rss(mm);
+			if (PageAnon(page))
+				dec_mm_counter_fast(mm, MM_ANONPAGES);
+			else
+				dec_mm_counter_fast(mm, MM_FILEPAGES);
+			page_remove_rmap(page);
+			page_cache_release(page);
+		}
+	}
+	pte_unmap_unlock(pte, ptl);
+}
+
+/* PaX: if vma is mirrored, synchronize the mirror's PTE
+ *
+ * the ptl of the lower mapped page is held on entry and is not released on exit
+ * or inside to ensure atomic changes to the PTE states (swapout, mremap, munmap, etc)
+ */
+static bool pax_mirror_anon_pte(struct vm_area_struct *vma, unsigned long address, struct page *page_m, spinlock_t *ptl)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long address_m;
+	spinlock_t *ptl_m;
+	struct vm_area_struct *vma_m;
+	pmd_t *pmd_m;
+	pte_t *pte_m, entry_m;
+
+	BUG_ON(!page_m || !PageAnon(page_m));
+
+	vma_m = pax_find_mirror_vma(vma);
+	if (!vma_m)
+		return false;
+
+	BUG_ON(!PageLocked(page_m));
+	BUG_ON(address >= SEGMEXEC_TASK_SIZE);
+	address_m = address + SEGMEXEC_TASK_SIZE;
+	pmd_m = pmd_offset(pud_offset(pgd_offset(mm, address_m), address_m), address_m);
+	pte_m = pte_offset_map(pmd_m, address_m);
+	ptl_m = pte_lockptr(mm, pmd_m);
+	if (ptl != ptl_m) {
+		spin_lock_nested(ptl_m, SINGLE_DEPTH_NESTING);
+		if (!pte_none(*pte_m))
+			goto out;
+	}
+
+	entry_m = pfn_pte(page_to_pfn(page_m), vma_m->vm_page_prot);
+	page_cache_get(page_m);
+	page_add_anon_rmap(page_m, vma_m, address_m);
+	inc_mm_counter_fast(mm, MM_ANONPAGES);
+	set_pte_at(mm, address_m, pte_m, entry_m);
+	update_mmu_cache(vma_m, address_m, pte_m);
+out:
+	if (ptl != ptl_m)
+		spin_unlock(ptl_m);
+	pte_unmap(pte_m);
+	return true;
+}
+
+void pax_mirror_file_pte(struct vm_area_struct *vma, unsigned long address, struct page *page_m, spinlock_t *ptl)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long address_m;
+	spinlock_t *ptl_m;
+	struct vm_area_struct *vma_m;
+	pmd_t *pmd_m;
+	pte_t *pte_m, entry_m;
+
+	BUG_ON(!page_m || PageAnon(page_m));
+
+	vma_m = pax_find_mirror_vma(vma);
+	if (!vma_m)
+		return;
+
+	BUG_ON(address >= SEGMEXEC_TASK_SIZE);
+	address_m = address + SEGMEXEC_TASK_SIZE;
+	pmd_m = pmd_offset(pud_offset(pgd_offset(mm, address_m), address_m), address_m);
+	pte_m = pte_offset_map(pmd_m, address_m);
+	ptl_m = pte_lockptr(mm, pmd_m);
+	if (ptl != ptl_m) {
+		spin_lock_nested(ptl_m, SINGLE_DEPTH_NESTING);
+		if (!pte_none(*pte_m))
+			goto out;
+	}
+
+	entry_m = pfn_pte(page_to_pfn(page_m), vma_m->vm_page_prot);
+	page_cache_get(page_m);
+	page_add_file_rmap(page_m);
+	inc_mm_counter_fast(mm, MM_FILEPAGES);
+	set_pte_at(mm, address_m, pte_m, entry_m);
+	update_mmu_cache(vma_m, address_m, pte_m);
+out:
+	if (ptl != ptl_m)
+		spin_unlock(ptl_m);
+	pte_unmap(pte_m);
+}
+
+static void pax_mirror_pfn_pte(struct vm_area_struct *vma, unsigned long address, unsigned long pfn_m, spinlock_t *ptl)
+{
+	struct mm_struct *mm = vma->vm_mm;
+	unsigned long address_m;
+	spinlock_t *ptl_m;
+	struct vm_area_struct *vma_m;
+	pmd_t *pmd_m;
+	pte_t *pte_m, entry_m;
+
+	vma_m = pax_find_mirror_vma(vma);
+	if (!vma_m)
+		return;
+
+	BUG_ON(address >= SEGMEXEC_TASK_SIZE);
+	address_m = address + SEGMEXEC_TASK_SIZE;
+	pmd_m = pmd_offset(pud_offset(pgd_offset(mm, address_m), address_m), address_m);
+	pte_m = pte_offset_map(pmd_m, address_m);
+	ptl_m = pte_lockptr(mm, pmd_m);
+	if (ptl != ptl_m) {
+		spin_lock_nested(ptl_m, SINGLE_DEPTH_NESTING);
+		if (!pte_none(*pte_m))
+			goto out;
+	}
+
+	entry_m = pfn_pte(pfn_m, vma_m->vm_page_prot);
+	set_pte_at(mm, address_m, pte_m, entry_m);
+out:
+	if (ptl != ptl_m)
+		spin_unlock(ptl_m);
+	pte_unmap(pte_m);
+}
+
+static void pax_mirror_pte(struct vm_area_struct *vma, unsigned long address, pte_t *pte, pmd_t *pmd, spinlock_t *ptl)
+{
+	struct page *page_m;
+	pte_t entry;
+
+	if (!(vma->vm_mm->pax_flags & MF_PAX_SEGMEXEC))
+		return;
+
+	entry = *pte;
+	page_m  = vm_normal_page(vma, address, entry);
+	if (!page_m)
+		pax_mirror_pfn_pte(vma, address, pte_pfn(entry), ptl);
+	else if (PageAnon(page_m)) {
+		if (pax_find_mirror_vma(vma)) {
+			pte_unmap_unlock(pte, ptl);
+			lock_page(page_m);
+			pte = pte_offset_map_lock(vma->vm_mm, pmd, address, &ptl);
+			if (pte_same(entry, *pte))
+				pax_mirror_anon_pte(vma, address, page_m, ptl);
+			unlock_page(page_m);
+		}
+	} else
+		pax_mirror_file_pte(vma, address, page_m, ptl);
+}
+#endif
+
 /*
  * Handle the case of a page which we actually need to copy to a new page.
  *
@@ -2182,6 +2394,12 @@ static int wp_page_copy(struct mm_struct *mm, struct vm_area_struct *vma,
 	 */
 	page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (likely(pte_same(*page_table, orig_pte))) {
+
+#ifdef CONFIG_PAX_SEGMEXEC
+		if (pax_find_mirror_vma(vma))
+			BUG_ON(!trylock_page(new_page));
+#endif
+
 		if (old_page) {
 			if (!PageAnon(old_page)) {
 				dec_mm_counter_fast(mm, MM_FILEPAGES);
@@ -2235,6 +2453,11 @@ static int wp_page_copy(struct mm_struct *mm, struct vm_area_struct *vma,
 			 */
 			page_remove_rmap(old_page);
 		}
+
+#ifdef CONFIG_PAX_SEGMEXEC
+		if (pax_mirror_anon_pte(vma, address, new_page, ptl))
+			unlock_page(new_page);
+#endif
 
 		/* Free the old page.. */
 		new_page = old_page;
@@ -2667,6 +2890,11 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	swap_free(entry);
 	if (vm_swap_full() || (vma->vm_flags & VM_LOCKED) || PageMlocked(page))
 		try_to_free_swap(page);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	if ((flags & FAULT_FLAG_WRITE) || !pax_find_mirror_vma(vma))
+#endif
+
 	unlock_page(page);
 	if (page != swapcache) {
 		/*
@@ -2690,6 +2918,12 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, address, page_table);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	if (pax_mirror_anon_pte(vma, address, page, ptl))
+		unlock_page(page);
+#endif
+
 unlock:
 	pte_unmap_unlock(page_table, ptl);
 out:
@@ -2718,21 +2952,22 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		unsigned int flags)
 {
 	struct mem_cgroup *memcg;
-	struct page *page;
+	struct page *page = NULL;
 	spinlock_t *ptl;
 	pte_t entry;
 
-	pte_unmap(page_table);
-
 	/* File mapping without ->vm_ops ? */
-	if (vma->vm_flags & VM_SHARED)
+	if (vma->vm_flags & VM_SHARED) {
+		pte_unmap(page_table);
 		return VM_FAULT_SIGBUS;
+	}
 
 	/* Use the zero-page for reads */
 	if (!(flags & FAULT_FLAG_WRITE) && !mm_forbids_zeropage(mm)) {
 		entry = pte_mkspecial(pfn_pte(my_zero_pfn(address),
 						vma->vm_page_prot));
-		page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
+		ptl = pte_lockptr(mm, pmd);
+		spin_lock(ptl);
 		if (!pte_none(*page_table))
 			goto unlock;
 		/* Deliver the page fault to userland, check inside PT lock */
@@ -2745,6 +2980,8 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 
 	/* Allocate our own private page. */
+	pte_unmap(page_table);
+
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
 	page = alloc_zeroed_user_highpage_movable(vma, address);
@@ -2778,6 +3015,11 @@ static int do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 					VM_UFFD_MISSING);
 	}
 
+#ifdef CONFIG_PAX_SEGMEXEC
+	if (pax_find_mirror_vma(vma))
+		BUG_ON(!trylock_page(page));
+#endif
+
 	inc_mm_counter_fast(mm, MM_ANONPAGES);
 	page_add_new_anon_rmap(page, vma, address);
 	mem_cgroup_commit_charge(page, memcg, false);
@@ -2787,6 +3029,12 @@ setpte:
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, address, page_table);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	if (page && pax_mirror_anon_pte(vma, address, page, ptl))
+		unlock_page(page);
+#endif
+
 unlock:
 	pte_unmap_unlock(page_table, ptl);
 	return 0;
@@ -3021,6 +3269,11 @@ static int do_read_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return ret;
 	}
 	do_set_pte(vma, address, fault_page, pte, false, false);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	pax_mirror_file_pte(vma, address, fault_page, ptl);
+#endif
+
 	unlock_page(fault_page);
 unlock_out:
 	pte_unmap_unlock(pte, ptl);
@@ -3072,7 +3325,19 @@ static int do_cow_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		}
 		goto uncharge_out;
 	}
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	if (pax_find_mirror_vma(vma))
+		BUG_ON(!trylock_page(new_page));
+#endif
+
 	do_set_pte(vma, address, new_page, pte, true, true);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	if (pax_mirror_anon_pte(vma, address, new_page, ptl))
+		unlock_page(new_page);
+#endif
+
 	mem_cgroup_commit_charge(new_page, memcg, false);
 	lru_cache_add_active_or_unevictable(new_page, vma);
 	pte_unmap_unlock(pte, ptl);
@@ -3130,6 +3395,11 @@ static int do_shared_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 		return ret;
 	}
 	do_set_pte(vma, address, fault_page, pte, true, false);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	pax_mirror_file_pte(vma, address, fault_page, ptl);
+#endif
+
 	pte_unmap_unlock(pte, ptl);
 
 	if (set_page_dirty(fault_page))
@@ -3376,6 +3646,11 @@ static int handle_pte_fault(struct mm_struct *mm,
 		if (flags & FAULT_FLAG_WRITE)
 			flush_tlb_fix_spurious_fault(vma, address);
 	}
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	pax_mirror_pte(vma, address, pte, pmd, ptl);
+#endif
+
 unlock:
 	pte_unmap_unlock(pte, ptl);
 	return 0;
@@ -3395,8 +3670,40 @@ static int __handle_mm_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	pmd_t *pmd;
 	pte_t *pte;
 
+#ifdef CONFIG_PAX_SEGMEXEC
+	struct vm_area_struct *vma_m;
+#endif
+
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		return hugetlb_fault(mm, vma, address, flags);
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	vma_m = pax_find_mirror_vma(vma);
+	if (vma_m) {
+		unsigned long address_m;
+		pgd_t *pgd_m;
+		pud_t *pud_m;
+		pmd_t *pmd_m;
+
+		if (vma->vm_start > vma_m->vm_start) {
+			address_m = address;
+			address -= SEGMEXEC_TASK_SIZE;
+			vma = vma_m;
+		} else
+			address_m = address + SEGMEXEC_TASK_SIZE;
+
+		pgd_m = pgd_offset(mm, address_m);
+		pud_m = pud_alloc(mm, pgd_m, address_m);
+		if (!pud_m)
+			return VM_FAULT_OOM;
+		pmd_m = pmd_alloc(mm, pud_m, address_m);
+		if (!pmd_m)
+			return VM_FAULT_OOM;
+		if (!pmd_present(*pmd_m) && __pte_alloc(mm, vma_m, pmd_m, address_m))
+			return VM_FAULT_OOM;
+		pax_unmap_mirror_pte(vma_m, address_m, pmd_m);
+	}
+#endif
 
 	pgd = pgd_offset(mm, address);
 	pud = pud_alloc(mm, pgd, address);
@@ -3523,7 +3830,7 @@ EXPORT_SYMBOL_GPL(handle_mm_fault);
  * Allocate page upper directory.
  * We've already handled the fast-path in-line.
  */
-int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+static int ____pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address, bool kernel)
 {
 	pud_t *new = pud_alloc_one(mm, address);
 	if (!new)
@@ -3534,10 +3841,22 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 	spin_lock(&mm->page_table_lock);
 	if (pgd_present(*pgd))		/* Another has populated it */
 		pud_free(mm, new);
+	else if (kernel)
+		pgd_populate_kernel(mm, pgd, new);
 	else
 		pgd_populate(mm, pgd, new);
 	spin_unlock(&mm->page_table_lock);
 	return 0;
+}
+
+int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+{
+	return ____pud_alloc(mm, pgd, address, false);
+}
+
+int __pud_alloc_kernel(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
+{
+	return ____pud_alloc(mm, pgd, address, true);
 }
 #endif /* __PAGETABLE_PUD_FOLDED */
 
@@ -3546,7 +3865,7 @@ int __pud_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
  * Allocate page middle directory.
  * We've already handled the fast-path in-line.
  */
-int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
+static int ____pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address, bool kernel)
 {
 	pmd_t *new = pmd_alloc_one(mm, address);
 	if (!new)
@@ -3558,18 +3877,34 @@ int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 #ifndef __ARCH_HAS_4LEVEL_HACK
 	if (!pud_present(*pud)) {
 		mm_inc_nr_pmds(mm);
-		pud_populate(mm, pud, new);
+		if (kernel)
+			pud_populate_kernel(mm, pud, new);
+		else
+			pud_populate(mm, pud, new);
 	} else	/* Another has populated it */
 		pmd_free(mm, new);
 #else
 	if (!pgd_present(*pud)) {
 		mm_inc_nr_pmds(mm);
-		pgd_populate(mm, pud, new);
+		if (kernel)
+			pgd_populate_kernel(mm, pud, new);
+		else
+			pgd_populate(mm, pud, new);
 	} else /* Another has populated it */
 		pmd_free(mm, new);
 #endif /* __ARCH_HAS_4LEVEL_HACK */
 	spin_unlock(&mm->page_table_lock);
 	return 0;
+}
+
+int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
+{
+	return ____pmd_alloc(mm, pud, address, false);
+}
+
+int __pmd_alloc_kernel(struct mm_struct *mm, pud_t *pud, unsigned long address)
+{
+	return ____pmd_alloc(mm, pud, address, true);
 }
 #endif /* __PAGETABLE_PMD_FOLDED */
 
@@ -3680,8 +4015,8 @@ out:
 	return ret;
 }
 
-int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
-			void *buf, int len, int write)
+ssize_t generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
+			void *buf, size_t len, int write)
 {
 	resource_size_t phys_addr;
 	unsigned long prot = 0;
@@ -3710,21 +4045,22 @@ EXPORT_SYMBOL_GPL(generic_access_phys);
  * Access another process' address space as given in mm.  If non-NULL, use the
  * given task for page fault accounting.
  */
-static int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
-		unsigned long addr, void *buf, int len, int write)
+static ssize_t __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
+		unsigned long addr, void *buf, size_t len, unsigned int gup_flags)
 {
 	struct vm_area_struct *vma;
 	void *old_buf = buf;
+	int write = gup_flags & FOLL_WRITE;
 
 	down_read(&mm->mmap_sem);
 	/* ignore errors, just check how much was successfully transferred */
 	while (len) {
-		int bytes, ret, offset;
+		ssize_t bytes, ret, offset;
 		void *maddr;
 		struct page *page = NULL;
 
-		ret = get_user_pages(tsk, mm, addr, 1,
-				write, 1, &page, &vma);
+		ret = get_user_pages_withflags(tsk, mm, addr, 1,
+				write, 1, &page, &vma, gup_flags);
 		if (ret <= 0) {
 #ifndef CONFIG_HAVE_IOREMAP_PROT
 			break;
@@ -3776,14 +4112,14 @@ static int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
  * @addr:	start address to access
  * @buf:	source or destination buffer
  * @len:	number of bytes to transfer
- * @write:	whether the access is a write
+ * @gup_flags:	flags modifying lookup behaviour
  *
  * The caller must hold a reference on @mm.
  */
-int access_remote_vm(struct mm_struct *mm, unsigned long addr,
-		void *buf, int len, int write)
+ssize_t access_remote_vm(struct mm_struct *mm, unsigned long addr,
+		void *buf, size_t len, unsigned int gup_flags)
 {
-	return __access_remote_vm(NULL, mm, addr, buf, len, write);
+	return __access_remote_vm(NULL, mm, addr, buf, len, gup_flags);
 }
 
 /*
@@ -3791,17 +4127,17 @@ int access_remote_vm(struct mm_struct *mm, unsigned long addr,
  * Source/target buffer must be kernel space,
  * Do not walk the page table directly, use get_user_pages
  */
-int access_process_vm(struct task_struct *tsk, unsigned long addr,
-		void *buf, int len, int write)
+ssize_t access_process_vm(struct task_struct *tsk, unsigned long addr,
+		void *buf, size_t len, int write)
 {
 	struct mm_struct *mm;
-	int ret;
+	ssize_t ret;
 
 	mm = get_task_mm(tsk);
 	if (!mm)
 		return 0;
 
-	ret = __access_remote_vm(tsk, mm, addr, buf, len, write);
+	ret = __access_remote_vm(tsk, mm, addr, buf, len, write ? FOLL_WRITE : 0);
 	mmput(mm);
 
 	return ret;

@@ -1465,11 +1465,19 @@ static int meye_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	unsigned long start = vma->vm_start;
 	unsigned long size = vma->vm_end - vma->vm_start;
-	unsigned long offset = vma->vm_pgoff << PAGE_SHIFT;
+	unsigned long offset;
 	unsigned long page, pos;
 
 	mutex_lock(&meye.lock);
-	if (size > gbuffers * gbufsize) {
+
+	if (vma->vm_pgoff > (~0UL >> PAGE_SHIFT)) {
+		mutex_unlock(&meye.lock);
+		return -EINVAL;
+	}
+
+	offset = vma->vm_pgoff << PAGE_SHIFT;
+
+	if (offset > gbuffers * gbufsize || size > gbuffers * gbufsize - offset) {
 		mutex_unlock(&meye.lock);
 		return -EINVAL;
 	}

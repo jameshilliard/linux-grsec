@@ -133,7 +133,7 @@ check_mapped_name(const struct usbmix_name_map *p, char *buf, int buflen)
 		return 0;
 
 	buflen--;
-	return strlcpy(buf, p->name, buflen);
+	return strlcpy_check(buf, p->name, buflen);
 }
 
 /* ignore the error value if ignore_ctl_error flag is set */
@@ -170,7 +170,7 @@ static int check_mapped_selector_name(struct mixer_build *state, int unitid,
 		return 0;
 	for (p = state->selector_map; p->id; p++) {
 		if (p->id == unitid && index < p->count)
-			return strlcpy(buf, p->names[index], buflen);
+			return strlcpy_check(buf, p->names[index], buflen);
 	}
 	return 0;
 }

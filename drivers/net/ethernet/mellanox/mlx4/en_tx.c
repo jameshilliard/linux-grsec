@@ -477,8 +477,8 @@ static bool mlx4_en_process_tx_cq(struct net_device *dev,
 	wmb();
 
 	/* we want to dirty this cache line once */
-	ACCESS_ONCE(ring->last_nr_txbb) = last_nr_txbb;
-	ACCESS_ONCE(ring->cons) = ring_cons + txbbs_skipped;
+	ACCESS_ONCE_RW(ring->last_nr_txbb) = last_nr_txbb;
+	ACCESS_ONCE_RW(ring->cons) = ring_cons + txbbs_skipped;
 
 	netdev_tx_completed_queue(ring->tx_queue, packets, bytes);
 

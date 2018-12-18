@@ -3,6 +3,7 @@
 #include <asm/segment.h>
 #include <asm/page.h>
 #include <asm/pgtable_32.h>
+#include <asm/nospec-branch.h>
 
 	.macro writepost,value
 		movb $0x34, %al

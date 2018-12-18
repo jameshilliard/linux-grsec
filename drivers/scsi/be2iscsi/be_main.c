@@ -5462,7 +5462,7 @@ beiscsi_hw_health_check(struct work_struct *work)
 
 
 static pci_ers_result_t beiscsi_eeh_err_detected(struct pci_dev *pdev,
-		pci_channel_state_t state)
+		enum pci_channel_state state)
 {
 	struct beiscsi_hba *phba = NULL;
 

@@ -15,7 +15,7 @@ struct sock_diag_handler {
 	__u8 family;
 	int (*dump)(struct sk_buff *skb, struct nlmsghdr *nlh);
 	int (*get_info)(struct sk_buff *skb, struct sock *sk);
-};
+} __do_const;
 
 int sock_diag_register(const struct sock_diag_handler *h);
 void sock_diag_unregister(const struct sock_diag_handler *h);

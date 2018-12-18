@@ -753,7 +753,7 @@ static void c2_reset(struct c2_port *c2_port)
 	pr_debug("Current RX: %u\n", c2dev->cur_rx);
 }
 
-static int c2_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
+static netdev_tx_t c2_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct c2_port *c2_port = netdev_priv(netdev);
 	struct c2_dev *c2dev = c2_port->c2dev;

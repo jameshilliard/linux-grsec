@@ -39,7 +39,7 @@ struct user_namespace {
 	struct key		*persistent_keyring_register;
 	struct rw_semaphore	persistent_keyring_register_sem;
 #endif
-};
+} __randomize_layout;
 
 extern struct user_namespace init_user_ns;
 

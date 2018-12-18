@@ -196,7 +196,7 @@ struct clk *clk_register_composite(struct device *dev, const char *name,
 	struct clk *clk;
 	struct clk_init_data init;
 	struct clk_composite *composite;
-	struct clk_ops *clk_composite_ops;
+	clk_ops_no_const *clk_composite_ops;
 
 	composite = kzalloc(sizeof(*composite), GFP_KERNEL);
 	if (!composite)

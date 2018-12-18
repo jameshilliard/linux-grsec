@@ -273,7 +273,7 @@ static void put_clock_desc(struct posix_clock_desc *cd)
 	fput(cd->fp);
 }
 
-static int pc_clock_adjtime(clockid_t id, struct timex *tx)
+static int pc_clock_adjtime(const clockid_t id, struct timex *tx)
 {
 	struct posix_clock_desc cd;
 	int err;
@@ -297,7 +297,7 @@ out:
 	return err;
 }
 
-static int pc_clock_gettime(clockid_t id, struct timespec *ts)
+static int pc_clock_gettime(const clockid_t id, struct timespec *ts)
 {
 	struct posix_clock_desc cd;
 	struct timespec64 ts64;
@@ -319,7 +319,7 @@ static int pc_clock_gettime(clockid_t id, struct timespec *ts)
 	return err;
 }
 
-static int pc_clock_getres(clockid_t id, struct timespec *ts)
+static int pc_clock_getres(const clockid_t id, struct timespec *ts)
 {
 	struct posix_clock_desc cd;
 	struct timespec64 ts64;
@@ -341,7 +341,7 @@ static int pc_clock_getres(clockid_t id, struct timespec *ts)
 	return err;
 }
 
-static int pc_clock_settime(clockid_t id, const struct timespec *ts)
+static int pc_clock_settime(const clockid_t id, const struct timespec *ts)
 {
 	struct timespec64 ts64 = timespec_to_timespec64(*ts);
 	struct posix_clock_desc cd;

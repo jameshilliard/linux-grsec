@@ -14,6 +14,8 @@
 
 #include <linux/perf_event.h>
 
+#include <asm/intel_ds.h>
+
 #if 0
 #undef wrmsrl
 #define wrmsrl(msr, val) 						\
@@ -87,9 +89,6 @@ struct amd_nb {
 	struct event_constraint event_constraints[X86_PMC_IDX_MAX];
 };
 
-/* The maximal number of PEBS events: */
-#define MAX_PEBS_EVENTS		8
-
 /*
  * Flags PEBS can handle without an PMI.
  *
@@ -103,27 +102,10 @@ struct amd_nb {
 	PERF_SAMPLE_TRANSACTION)
 
 /*
- * A debug store configuration.
- *
- * We only support architectures that use 64bit fields.
- */
-struct debug_store {
-	u64	bts_buffer_base;
-	u64	bts_index;
-	u64	bts_absolute_maximum;
-	u64	bts_interrupt_threshold;
-	u64	pebs_buffer_base;
-	u64	pebs_index;
-	u64	pebs_absolute_maximum;
-	u64	pebs_interrupt_threshold;
-	u64	pebs_event_reset[MAX_PEBS_EVENTS];
-};
-
-/*
  * Per register state.
  */
 struct er_account {
-	raw_spinlock_t		lock;	/* per-core: protect structure */
+	raw_spinlock_t      lock;	/* per-core: protect structure */
 	u64                 config;	/* extra MSR config */
 	u64                 reg;	/* extra MSR number */
 	atomic_t            ref;	/* reference count */
@@ -203,6 +185,8 @@ struct cpu_hw_events {
 	 * Intel DebugStore bits
 	 */
 	struct debug_store	*ds;
+	void			*ds_pebs_vaddr;
+	void			*ds_bts_vaddr;
 	u64			pebs_enabled;
 
 	/*
@@ -613,6 +597,11 @@ struct x86_pmu {
 	atomic_t	lbr_exclusive[x86_lbr_exclusive_max];
 
 	/*
+	 * AMD bits
+	 */
+	unsigned int	amd_nb_constraints : 1;
+
+	/*
 	 * Extra registers for events
 	 */
 	struct extra_reg *extra_regs;
@@ -755,7 +744,7 @@ static inline void x86_pmu_disable_event(struct perf_event *event)
 {
 	struct hw_perf_event *hwc = &event->hw;
 
-	wrmsrl(hwc->config_base, hwc->config);
+	wrmsrl_safe(hwc->config_base, hwc->config);
 }
 
 void x86_pmu_enable_event(struct perf_event *event);
@@ -792,7 +781,7 @@ static inline void set_linear_ip(struct pt_regs *regs, unsigned long ip)
 	regs->cs = kernel_ip(ip) ? __KERNEL_CS : __USER_CS;
 	if (regs->flags & X86_VM_MASK)
 		regs->flags ^= (PERF_EFLAGS_VM | X86_VM_MASK);
-	regs->ip = ip;
+	regs->ip = kernel_ip(ip) ? ktva_ktla(ip) : ip;
 }
 
 ssize_t x86_event_sysfs_show(char *page, u64 config, u64 event);

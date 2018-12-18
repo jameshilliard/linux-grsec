@@ -346,7 +346,7 @@ int yama_ptrace_traceme(struct task_struct *parent)
 	return rc;
 }
 
-static struct security_hook_list yama_hooks[] = {
+static struct security_hook_list yama_hooks[] __read_only = {
 	LSM_HOOK_INIT(ptrace_access_check, yama_ptrace_access_check),
 	LSM_HOOK_INIT(ptrace_traceme, yama_ptrace_traceme),
 	LSM_HOOK_INIT(task_prctl, yama_task_prctl),
@@ -357,7 +357,7 @@ static struct security_hook_list yama_hooks[] = {
 static int yama_dointvec_minmax(struct ctl_table *table, int write,
 				void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct ctl_table table_copy;
+	ctl_table_no_const table_copy;
 
 	if (write && !capable(CAP_SYS_PTRACE))
 		return -EPERM;

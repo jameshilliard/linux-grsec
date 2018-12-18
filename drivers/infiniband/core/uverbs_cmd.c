@@ -961,6 +961,9 @@ ssize_t ib_uverbs_reg_mr(struct ib_uverbs_file *file,
 	if (copy_from_user(&cmd, buf, sizeof cmd))
 		return -EFAULT;
 
+	if (!access_ok_noprefault(VERIFY_READ, cmd.start, cmd.length))
+		return -EFAULT;
+
 	INIT_UDATA(&udata, buf + sizeof cmd,
 		   (unsigned long) cmd.response + sizeof resp,
 		   in_len - sizeof cmd, out_len - sizeof resp);
@@ -3098,8 +3101,8 @@ int ib_uverbs_ex_create_flow(struct ib_uverbs_file *file,
 	struct ib_uverbs_flow_attr	  *kern_flow_attr;
 	struct ib_flow_attr		  *flow_attr;
 	struct ib_qp			  *qp;
+	struct ib_uverbs_flow_spec_hdr	  *kern_spec;
 	int err = 0;
-	void *kern_spec;
 	void *ib_spec;
 	int i;
 
@@ -3141,8 +3144,8 @@ int ib_uverbs_ex_create_flow(struct ib_uverbs_file *file,
 		if (!kern_flow_attr)
 			return -ENOMEM;
 
-		memcpy(kern_flow_attr, &cmd.flow_attr, sizeof(*kern_flow_attr));
-		err = ib_copy_from_udata(kern_flow_attr + 1, ucore,
+		*kern_flow_attr = cmd.flow_attr;
+		err = ib_copy_from_udata(&kern_flow_attr->flow_specs, ucore,
 					 cmd.flow_attr.size);
 		if (err)
 			goto err_free_attr;
@@ -3164,6 +3167,11 @@ int ib_uverbs_ex_create_flow(struct ib_uverbs_file *file,
 		goto err_uobj;
 	}
 
+	if (qp->qp_type != IB_QPT_UD && qp->qp_type != IB_QPT_RAW_PACKET) {
+		err = -EINVAL;
+		goto err_put;
+	}
+
 	flow_attr = kmalloc(sizeof(*flow_attr) + cmd.flow_attr.size, GFP_KERNEL);
 	if (!flow_attr) {
 		err = -ENOMEM;
@@ -3177,19 +3185,20 @@ int ib_uverbs_ex_create_flow(struct ib_uverbs_file *file,
 	flow_attr->flags = kern_flow_attr->flags;
 	flow_attr->size = sizeof(*flow_attr);
 
-	kern_spec = kern_flow_attr + 1;
+	kern_spec = kern_flow_attr->flow_specs;
 	ib_spec = flow_attr + 1;
 	for (i = 0; i < flow_attr->num_of_specs &&
-	     cmd.flow_attr.size > offsetof(struct ib_uverbs_flow_spec, reserved) &&
-	     cmd.flow_attr.size >=
-	     ((struct ib_uverbs_flow_spec *)kern_spec)->size; i++) {
-		err = kern_spec_to_ib_spec(kern_spec, ib_spec);
+			cmd.flow_attr.size >= sizeof(*kern_spec) &&
+			cmd.flow_attr.size >= kern_spec->size;
+	     i++) {
+		err = kern_spec_to_ib_spec((struct ib_uverbs_flow_spec *)kern_spec,
+				ib_spec);
 		if (err)
 			goto err_free;
 		flow_attr->size +=
 			((union ib_flow_spec *) ib_spec)->size;
-		cmd.flow_attr.size -= ((struct ib_uverbs_flow_spec *)kern_spec)->size;
-		kern_spec += ((struct ib_uverbs_flow_spec *) kern_spec)->size;
+		cmd.flow_attr.size -= kern_spec->size;
+		kern_spec = ((void *)kern_spec) + kern_spec->size;
 		ib_spec += ((union ib_flow_spec *) ib_spec)->size;
 	}
 	if (cmd.flow_attr.size || (i != flow_attr->num_of_specs)) {

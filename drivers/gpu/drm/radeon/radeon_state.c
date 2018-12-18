@@ -2168,7 +2168,7 @@ static int radeon_cp_clear(struct drm_device *dev, void *data, struct drm_file *
 	if (sarea_priv->nbox > RADEON_NR_SAREA_CLIPRECTS)
 		sarea_priv->nbox = RADEON_NR_SAREA_CLIPRECTS;
 
-	if (copy_from_user(&depth_boxes, clear->depth_boxes,
+	if (sarea_priv->nbox > RADEON_NR_SAREA_CLIPRECTS || copy_from_user(&depth_boxes, clear->depth_boxes,
 			       sarea_priv->nbox * sizeof(depth_boxes[0])))
 		return -EFAULT;
 
@@ -3031,7 +3031,7 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_getparam_t *param = data;
-	int value;
+	int value = 0;
 
 	DRM_DEBUG("pid=%d\n", DRM_CURRENTPID);
 
@@ -3258,4 +3258,4 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(RADEON_CS, r600_cs_legacy_ioctl, DRM_AUTH)
 };
 
-int radeon_max_ioctl = ARRAY_SIZE(radeon_ioctls);
+const int radeon_max_ioctl = ARRAY_SIZE(radeon_ioctls);

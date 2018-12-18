@@ -409,10 +409,9 @@ static void request_end(struct fuse_conn *fc, struct fuse_req *req)
 		if (!fc->blocked && waitqueue_active(&fc->blocked_waitq))
 			wake_up(&fc->blocked_waitq);
 
-		if (fc->num_background == fc->congestion_threshold &&
-		    fc->connected && fc->bdi_initialized) {
-			clear_bdi_congested(&fc->bdi, BLK_RW_SYNC);
-			clear_bdi_congested(&fc->bdi, BLK_RW_ASYNC);
+		if (fc->num_background == fc->congestion_threshold && fc->sb) {
+			clear_bdi_congested(fc->sb->s_bdi, BLK_RW_SYNC);
+			clear_bdi_congested(fc->sb->s_bdi, BLK_RW_ASYNC);
 		}
 		fc->num_background--;
 		fc->active_background--;
@@ -1405,7 +1404,7 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 	ret = 0;
 	pipe_lock(pipe);
 
-	if (!pipe->readers) {
+	if (!atomic_read(&pipe->readers)) {
 		send_sig(SIGPIPE, current, 0);
 		if (!ret)
 			ret = -EPIPE;
@@ -1434,7 +1433,7 @@ static ssize_t fuse_dev_splice_read(struct file *in, loff_t *ppos,
 		page_nr++;
 		ret += buf->len;
 
-		if (pipe->files)
+		if (atomic_read(&pipe->files))
 			do_wakeup = 1;
 	}
 

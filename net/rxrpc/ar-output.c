@@ -648,14 +648,14 @@ static int rxrpc_send_data(struct rxrpc_sock *rx,
 					memset(skb_put(skb, pad), 0, pad);
 			}
 
-			seq = atomic_inc_return(&call->sequence);
+			seq = atomic_inc_return_unchecked(&call->sequence);
 
 			sp->hdr.epoch = conn->epoch;
 			sp->hdr.cid = call->cid;
 			sp->hdr.callNumber = call->call_id;
 			sp->hdr.seq = htonl(seq);
 			sp->hdr.serial =
-				htonl(atomic_inc_return(&conn->serial));
+				htonl(atomic_inc_return_unchecked(&conn->serial));
 			sp->hdr.type = RXRPC_PACKET_TYPE_DATA;
 			sp->hdr.userStatus = 0;
 			sp->hdr.securityIndex = conn->security_ix;

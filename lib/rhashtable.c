@@ -30,7 +30,7 @@
 
 #define HASH_DEFAULT_SIZE	64UL
 #define HASH_MIN_SIZE		4U
-#define BUCKET_LOCKS_PER_CPU   128UL
+#define BUCKET_LOCKS_PER_CPU	32UL
 
 static u32 head_hashfn(struct rhashtable *ht,
 		       const struct bucket_table *tbl,
@@ -70,21 +70,25 @@ static int alloc_bucket_locks(struct rhashtable *ht, struct bucket_table *tbl,
 	unsigned int nr_pcpus = num_possible_cpus();
 #endif
 
-	nr_pcpus = min_t(unsigned int, nr_pcpus, 32UL);
+	nr_pcpus = min_t(unsigned int, nr_pcpus, 64UL);
 	size = roundup_pow_of_two(nr_pcpus * ht->p.locks_mul);
 
 	/* Never allocate more than 0.5 locks per bucket */
 	size = min_t(unsigned int, size, tbl->size >> 1);
 
 	if (sizeof(spinlock_t) != 0) {
+		tbl->locks = NULL;
 #ifdef CONFIG_NUMA
 		if (size * sizeof(spinlock_t) > PAGE_SIZE &&
 		    gfp == GFP_KERNEL)
 			tbl->locks = vmalloc(size * sizeof(spinlock_t));
-		else
 #endif
-		tbl->locks = kmalloc_array(size, sizeof(spinlock_t),
-					   gfp);
+		if (gfp != GFP_KERNEL)
+			gfp |= __GFP_NOWARN | __GFP_NORETRY;
+
+		if (!tbl->locks)
+			tbl->locks = kmalloc_array(size, sizeof(spinlock_t),
+						   gfp);
 		if (!tbl->locks)
 			return -ENOMEM;
 		for (i = 0; i < size; i++)
@@ -324,12 +328,14 @@ static int rhashtable_expand(struct rhashtable *ht)
 static int rhashtable_shrink(struct rhashtable *ht)
 {
 	struct bucket_table *new_tbl, *old_tbl = rht_dereference(ht->tbl, ht);
-	unsigned int size;
+	unsigned int nelems = atomic_read(&ht->nelems);
+	unsigned int size = 0;
 	int err;
 
 	ASSERT_RHT_MUTEX(ht);
 
-	size = roundup_pow_of_two(atomic_read(&ht->nelems) * 3 / 2);
+	if (nelems)
+		size = roundup_pow_of_two(nelems * 3 / 2);
 	if (size < ht->p.min_size)
 		size = ht->p.min_size;
 
@@ -558,8 +564,8 @@ EXPORT_SYMBOL_GPL(rhashtable_walk_exit);
  * will rewind back to the beginning and you may use it immediately
  * by calling rhashtable_walk_next.
  */
+int rhashtable_walk_start(struct rhashtable_iter *iter) __acquires(RCU);
 int rhashtable_walk_start(struct rhashtable_iter *iter)
-	__acquires(RCU)
 {
 	struct rhashtable *ht = iter->ht;
 
@@ -643,8 +649,8 @@ EXPORT_SYMBOL_GPL(rhashtable_walk_next);
  *
  * Finish a hash table walk.
  */
+void rhashtable_walk_stop(struct rhashtable_iter *iter) __releases(RCU);
 void rhashtable_walk_stop(struct rhashtable_iter *iter)
-	__releases(RCU)
 {
 	struct rhashtable *ht;
 	struct bucket_table *tbl = iter->walker->tbl;
@@ -827,13 +833,14 @@ void rhashtable_free_and_destroy(struct rhashtable *ht,
 				 void (*free_fn)(void *ptr, void *arg),
 				 void *arg)
 {
-	const struct bucket_table *tbl;
+	struct bucket_table *tbl, *next_tbl;
 	unsigned int i;
 
 	cancel_work_sync(&ht->run_work);
 
 	mutex_lock(&ht->mutex);
 	tbl = rht_dereference(ht->tbl, ht);
+restart:
 	if (free_fn) {
 		for (i = 0; i < tbl->size; i++) {
 			struct rhash_head *pos, *next;
@@ -849,7 +856,12 @@ void rhashtable_free_and_destroy(struct rhashtable *ht,
 		}
 	}
 
+	next_tbl = rht_dereference(tbl->future_tbl, ht);
 	bucket_table_free(tbl);
+	if (next_tbl) {
+		tbl = next_tbl;
+		goto restart;
+	}
 	mutex_unlock(&ht->mutex);
 }
 EXPORT_SYMBOL_GPL(rhashtable_free_and_destroy);

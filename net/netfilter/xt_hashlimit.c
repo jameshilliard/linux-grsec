@@ -227,7 +227,7 @@ static int htable_create(struct net *net, struct xt_hashlimit_mtinfo1 *minfo,
 		size = minfo->cfg.size;
 	} else {
 		size = (totalram_pages << PAGE_SHIFT) / 16384 /
-		       sizeof(struct list_head);
+		       sizeof(struct hlist_head);
 		if (totalram_pages > 1024 * 1024 * 1024 / PAGE_SIZE)
 			size = 8192;
 		if (size < 16)
@@ -235,7 +235,7 @@ static int htable_create(struct net *net, struct xt_hashlimit_mtinfo1 *minfo,
 	}
 	/* FIXME: don't use vmalloc() here or anywhere else -HW */
 	hinfo = vmalloc(sizeof(struct xt_hashlimit_htable) +
-	                sizeof(struct list_head) * size);
+	                sizeof(struct hlist_head) * size);
 	if (hinfo == NULL)
 		return -ENOMEM;
 	minfo->hinfo = hinfo;
@@ -699,6 +699,10 @@ static int hashlimit_mt_check(const struct xt_mtchk_param *par)
 			return -ERANGE;
 	}
 
+	ret = xt_check_proc_name(info->name, sizeof(info->name));
+	if (ret)
+		return ret;
+
 	mutex_lock(&hashlimit_mutex);
 	info->hinfo = htable_find_get(net, info->name, par->family);
 	if (info->hinfo == NULL) {
@@ -870,11 +874,11 @@ static int __net_init hashlimit_proc_net_init(struct net *net)
 {
 	struct hashlimit_net *hashlimit_net = hashlimit_pernet(net);
 
-	hashlimit_net->ipt_hashlimit = proc_mkdir("ipt_hashlimit", net->proc_net);
+	hashlimit_net->ipt_hashlimit = proc_mkdir_restrict("ipt_hashlimit", net->proc_net);
 	if (!hashlimit_net->ipt_hashlimit)
 		return -ENOMEM;
 #if IS_ENABLED(CONFIG_IP6_NF_IPTABLES)
-	hashlimit_net->ip6t_hashlimit = proc_mkdir("ip6t_hashlimit", net->proc_net);
+	hashlimit_net->ip6t_hashlimit = proc_mkdir_restrict("ip6t_hashlimit", net->proc_net);
 	if (!hashlimit_net->ip6t_hashlimit) {
 		remove_proc_entry("ipt_hashlimit", net->proc_net);
 		return -ENOMEM;

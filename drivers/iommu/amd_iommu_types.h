@@ -565,6 +565,8 @@ struct amd_iommu {
 	struct irq_domain *ir_domain;
 	struct irq_domain *msi_domain;
 #endif
+
+	volatile u64 __aligned(8) cmd_sem;
 };
 
 struct devid_map {

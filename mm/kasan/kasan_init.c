@@ -149,4 +149,22 @@ void __init kasan_populate_zero_shadow(const void *shadow_start,
 		}
 		zero_pud_populate(pgd, addr, next);
 	} while (pgd++, addr = next, addr != end);
+
+#ifdef CONFIG_PAX_PER_CPU_PGD
+	for (cpu = 0; cpu < nr_cpu_ids; ++cpu) {
+		clone_pgd_range(get_cpu_pgd(cpu, kernel) + KERNEL_PGD_BOUNDARY,
+			swapper_pg_dir + KERNEL_PGD_BOUNDARY,
+			KERNEL_PGD_PTRS);
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+		if (boot_cpu_has(X86_FEATURE_UDEREF))
+			continue;
+
+		if (boot_cpu_has(X86_FEATURE_PCID) || !boot_cpu_has(X86_FEATURE_SMAP))
+			clone_pgd_range(get_cpu_pgd(cpu, uaccess) + KERNEL_PGD_BOUNDARY,
+				swapper_pg_dir + KERNEL_PGD_BOUNDARY,
+				KERNEL_PGD_PTRS);
+#endif
+	}
+#endif
+
 }

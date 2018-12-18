@@ -165,6 +165,12 @@ struct ports_device {
 	 */
 	struct virtqueue *c_ivq, *c_ovq;
 
+	/*
+	 * A control packet buffer for guest->host requests, protected
+	 * by c_ovq_lock.
+	 */
+	struct virtio_console_control cpkt;
+
 	/* Array of per-port IO virtqueues */
 	struct virtqueue **in_vqs, **out_vqs;
 
@@ -560,28 +566,29 @@ static ssize_t __send_control_msg(struct ports_device *portdev, u32 port_id,
 				  unsigned int event, unsigned int value)
 {
 	struct scatterlist sg[1];
-	struct virtio_console_control cpkt;
 	struct virtqueue *vq;
 	unsigned int len;
 
 	if (!use_multiport(portdev))
 		return 0;
 
-	cpkt.id = cpu_to_virtio32(portdev->vdev, port_id);
-	cpkt.event = cpu_to_virtio16(portdev->vdev, event);
-	cpkt.value = cpu_to_virtio16(portdev->vdev, value);
-
 	vq = portdev->c_ovq;
 
-	sg_init_one(sg, &cpkt, sizeof(cpkt));
-
 	spin_lock(&portdev->c_ovq_lock);
-	if (virtqueue_add_outbuf(vq, sg, 1, &cpkt, GFP_ATOMIC) == 0) {
+
+	portdev->cpkt.id = cpu_to_virtio32(portdev->vdev, port_id);
+	portdev->cpkt.event = cpu_to_virtio16(portdev->vdev, event);
+	portdev->cpkt.value = cpu_to_virtio16(portdev->vdev, value);
+
+	sg_init_one(sg, &portdev->cpkt, sizeof(struct virtio_console_control));
+
+	if (virtqueue_add_outbuf(vq, sg, 1, &portdev->cpkt, GFP_ATOMIC) == 0) {
 		virtqueue_kick(vq);
 		while (!virtqueue_get_buf(vq, &len)
 			&& !virtqueue_is_broken(vq))
 			cpu_relax();
 	}
+
 	spin_unlock(&portdev->c_ovq_lock);
 	return 0;
 }
@@ -685,11 +692,11 @@ static ssize_t fill_readbuf(struct port *port, char __user *out_buf,
 	if (to_user) {
 		ssize_t ret;
 
-		ret = copy_to_user(out_buf, buf->buf + buf->offset, out_count);
+		ret = copy_to_user((char __force_user *)out_buf, buf->buf + buf->offset, out_count);
 		if (ret)
 			return -EFAULT;
 	} else {
-		memcpy((__force char *)out_buf, buf->buf + buf->offset,
+		memcpy((__force_kernel char *)out_buf, buf->buf + buf->offset,
 		       out_count);
 	}
 
@@ -1172,7 +1179,7 @@ static int get_chars(u32 vtermno, char *buf, int count)
 	/* If we don't have an input queue yet, we can't get input. */
 	BUG_ON(!port->in_vq);
 
-	return fill_readbuf(port, (__force char __user *)buf, count, false);
+	return fill_readbuf(port, (char __force_user *)buf, count, false);
 }
 
 static void resize_console(struct port *port)

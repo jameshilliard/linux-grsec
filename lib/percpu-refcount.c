@@ -31,7 +31,7 @@
  * atomic_long_t can't hit 0 before we've added up all the percpu refs.
  */
 
-#define PERCPU_COUNT_BIAS	(1LU << (BITS_PER_LONG - 1))
+#define PERCPU_COUNT_BIAS	(1LU << (BITS_PER_LONG - 2))
 
 static DECLARE_WAIT_QUEUE_HEAD(percpu_ref_switch_waitq);
 

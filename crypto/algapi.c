@@ -34,7 +34,7 @@ static inline int crypto_set_driver_name(struct crypto_alg *alg)
 	if (*driver_name)
 		return 0;
 
-	len = strlcpy(driver_name, alg->cra_name, CRYPTO_MAX_ALG_NAME);
+	len = strlcpy_check(driver_name, alg->cra_name, CRYPTO_MAX_ALG_NAME);
 	if (len + sizeof(suffix) > CRYPTO_MAX_ALG_NAME)
 		return -ENAMETOOLONG;
 

@@ -23,7 +23,7 @@
 #include <linux/of.h>
 #include <linux/of_pdt.h>
 
-static struct of_pdt_ops *of_pdt_prom_ops __initdata;
+static const struct of_pdt_ops *of_pdt_prom_ops __initdata;
 
 void __initdata (*of_pdt_build_more)(struct device_node *dp);
 
@@ -226,7 +226,7 @@ static void * __init kernel_tree_alloc(u64 size, u64 align)
 	return prom_early_alloc(size);
 }
 
-void __init of_pdt_build_devicetree(phandle root_node, struct of_pdt_ops *ops)
+void __init of_pdt_build_devicetree(phandle root_node, const struct of_pdt_ops *ops)
 {
 	BUG_ON(!ops);
 	of_pdt_prom_ops = ops;

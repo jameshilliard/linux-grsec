@@ -29,6 +29,7 @@
 #include <sound/initval.h>
 #include <sound/rawmidi.h>
 #include <sound/control.h>
+#include <asm/local.h>
 
 #define CARD_NAME "Miditerminal 4140"
 #define DRIVER_NAME "MTS64"
@@ -67,7 +68,7 @@ struct mts64 {
 	struct pardevice *pardev;
 	int pardev_claimed;
 
-	int open_count;
+	local_t open_count;
 	int current_midi_output_port;
 	int current_midi_input_port;
 	u8 mode[MTS64_NUM_INPUT_PORTS];
@@ -687,7 +688,7 @@ static int snd_mts64_rawmidi_open(struct snd_rawmidi_substream *substream)
 {
 	struct mts64 *mts = substream->rmidi->private_data;
 
-	if (mts->open_count == 0) {
+	if (local_read(&mts->open_count) == 0) {
 		/* We don't need a spinlock here, because this is just called 
 		   if the device has not been opened before. 
 		   So there aren't any IRQs from the device */
@@ -695,7 +696,7 @@ static int snd_mts64_rawmidi_open(struct snd_rawmidi_substream *substream)
 
 		msleep(50);
 	}
-	++(mts->open_count);
+	local_inc(&mts->open_count);
 
 	return 0;
 }
@@ -705,8 +706,7 @@ static int snd_mts64_rawmidi_close(struct snd_rawmidi_substream *substream)
 	struct mts64 *mts = substream->rmidi->private_data;
 	unsigned long flags;
 
-	--(mts->open_count);
-	if (mts->open_count == 0) {
+	if (local_dec_return(&mts->open_count) == 0) {
 		/* We need the spinlock_irqsave here because we can still
 		   have IRQs at this point */
 		spin_lock_irqsave(&mts->lock, flags);
@@ -715,8 +715,8 @@ static int snd_mts64_rawmidi_close(struct snd_rawmidi_substream *substream)
 
 		msleep(500);
 
-	} else if (mts->open_count < 0)
-		mts->open_count = 0;
+	} else if (local_read(&mts->open_count) < 0)
+		local_set(&mts->open_count, 0);
 
 	return 0;
 }

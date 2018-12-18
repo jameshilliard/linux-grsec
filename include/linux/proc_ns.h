@@ -16,7 +16,7 @@ struct proc_ns_operations {
 	struct ns_common *(*get)(struct task_struct *task);
 	void (*put)(struct ns_common *ns);
 	int (*install)(struct nsproxy *nsproxy, struct ns_common *ns);
-};
+} __do_const __randomize_layout;
 
 extern const struct proc_ns_operations netns_operations;
 extern const struct proc_ns_operations utsns_operations;

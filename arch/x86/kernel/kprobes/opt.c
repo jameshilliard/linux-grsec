@@ -37,6 +37,7 @@
 #include <asm/insn.h>
 #include <asm/debugreg.h>
 #include <asm/nospec-branch.h>
+#include <asm/sections.h>
 
 #include "common.h"
 
@@ -80,6 +81,7 @@ found:
 /* Insert a move instruction which sets a pointer to eax/rdi (1st arg). */
 static void synthesize_set_arg1(kprobe_opcode_t *addr, unsigned long val)
 {
+	pax_open_kernel();
 #ifdef CONFIG_X86_64
 	*addr++ = 0x48;
 	*addr++ = 0xbf;
@@ -87,6 +89,7 @@ static void synthesize_set_arg1(kprobe_opcode_t *addr, unsigned long val)
 	*addr++ = 0xb8;
 #endif
 	*(unsigned long *)addr = val;
+	pax_close_kernel();
 }
 
 asm (
@@ -363,7 +366,7 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op,
 	 * Verify if the address gap is in 2GB range, because this uses
 	 * a relative jump.
 	 */
-	rel = (long)op->optinsn.insn - (long)op->kp.addr + RELATIVEJUMP_SIZE;
+	rel = (long)op->optinsn.insn - ktla_ktva((long)op->kp.addr) + RELATIVEJUMP_SIZE;
 	if (abs(rel) > 0x7fffffff) {
 		__arch_remove_optimized_kprobe(op, 0);
 		return -ERANGE;
@@ -381,16 +384,18 @@ int arch_prepare_optimized_kprobe(struct optimized_kprobe *op,
 	op->optinsn.size = ret;
 
 	/* Copy arch-dep-instance from template */
-	memcpy(buf, &optprobe_template_entry, TMPL_END_IDX);
+	pax_open_kernel();
+	memcpy(buf, (u8 *)ktla_ktva((unsigned long)&optprobe_template_entry), TMPL_END_IDX);
+	pax_close_kernel();
 
 	/* Set probe information */
 	synthesize_set_arg1(buf + TMPL_MOVE_IDX, (unsigned long)op);
 
 	/* Set probe function call */
-	synthesize_relcall(buf + TMPL_CALL_IDX, optimized_callback);
+	synthesize_relcall((u8 *)ktva_ktla((unsigned long)buf) + TMPL_CALL_IDX, optimized_callback);
 
 	/* Set returning jmp instruction at the tail of out-of-line buffer */
-	synthesize_reljump(buf + TMPL_END_IDX + op->optinsn.size,
+	synthesize_reljump((u8 *)ktva_ktla((unsigned long)buf) + TMPL_END_IDX + op->optinsn.size,
 			   (u8 *)op->kp.addr + op->optinsn.size);
 
 	set_memory_ro((unsigned long)buf & PAGE_MASK, 1);
@@ -417,7 +422,7 @@ void arch_optimize_kprobes(struct list_head *oplist)
 		WARN_ON(kprobe_disabled(&op->kp));
 
 		/* Backup instructions which will be replaced by jump address */
-		memcpy(op->optinsn.copied_insn, op->kp.addr + INT3_SIZE,
+		memcpy(op->optinsn.copied_insn, (u8 *)ktla_ktva((unsigned long)op->kp.addr) + INT3_SIZE,
 		       RELATIVE_ADDR_SIZE);
 
 		insn_buf[0] = RELATIVEJUMP_OPCODE;
@@ -465,7 +470,7 @@ int setup_detour_execution(struct kprobe *p, struct pt_regs *regs, int reenter)
 		/* This kprobe is really able to run optimized path. */
 		op = container_of(p, struct optimized_kprobe, kp);
 		/* Detour through copied instructions */
-		regs->ip = (unsigned long)op->optinsn.insn + TMPL_END_IDX;
+		regs->ip = ktva_ktla((unsigned long)op->optinsn.insn) + TMPL_END_IDX;
 		if (!reenter)
 			reset_current_kprobe();
 		preempt_enable_no_resched();

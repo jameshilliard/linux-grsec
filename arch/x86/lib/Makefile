@@ -2,6 +2,9 @@
 # Makefile for x86 specific library files.
 #
 
+# Produces uninteresting flaky coverage.
+KCOV_INSTRUMENT_delay.o	:= n
+
 inat_tables_script = $(srctree)/arch/x86/tools/gen-insn-attr-x86.awk
 inat_tables_maps = $(srctree)/arch/x86/lib/x86-opcode-map.txt
 quiet_cmd_inat_tables = GEN     $@
@@ -26,6 +29,10 @@ lib-$(CONFIG_RETPOLINE) += retpoline.o
 obj-y += msr.o msr-reg.o msr-reg-export.o hweight.o
 
 ifeq ($(CONFIG_X86_32),y)
+        GCC_PLUGINS_CFLAGS_strstr_32.o += $(INITIFY_DISABLE_VERIFY_NOCAPTURE_FUNCTIONS)
+        GCC_PLUGINS_CFLAGS_string_32.o += $(INITIFY_DISABLE_VERIFY_NOCAPTURE_FUNCTIONS)
+        GCC_PLUGINS_CFLAGS_memcpy_32.o += $(INITIFY_DISABLE_VERIFY_NOCAPTURE_FUNCTIONS)
+
         obj-y += atomic64_32.o
         lib-y += atomic64_cx8_32.o
         lib-y += checksum_32.o

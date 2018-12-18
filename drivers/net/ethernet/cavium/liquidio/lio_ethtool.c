@@ -264,9 +264,9 @@ static void octnet_mdio_resp_callback(struct octeon_device *oct,
 	if (status) {
 		dev_err(&oct->pci_dev->dev, "MIDO instruction failed. Status: %llx\n",
 			CVM_CAST64(status));
-		ACCESS_ONCE(mdio_cmd_ctx->cond) = -1;
+		ACCESS_ONCE_RW(mdio_cmd_ctx->cond) = -1;
 	} else {
-		ACCESS_ONCE(mdio_cmd_ctx->cond) = 1;
+		ACCESS_ONCE_RW(mdio_cmd_ctx->cond) = 1;
 	}
 	wake_up_interruptible(&mdio_cmd_ctx->wc);
 }
@@ -297,7 +297,7 @@ octnet_mdio45_access(struct lio *lio, int op, int loc, int *value)
 	mdio_cmd_rsp = (struct oct_mdio_cmd_resp *)sc->virtrptr;
 	mdio_cmd = (struct oct_mdio_cmd *)sc->virtdptr;
 
-	ACCESS_ONCE(mdio_cmd_ctx->cond) = 0;
+	ACCESS_ONCE_RW(mdio_cmd_ctx->cond) = 0;
 	mdio_cmd_ctx->octeon_id = lio_get_device_id(oct_dev);
 	mdio_cmd->op = op;
 	mdio_cmd->mdio_addr = loc;

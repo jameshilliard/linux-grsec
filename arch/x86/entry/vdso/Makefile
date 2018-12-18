@@ -5,6 +5,9 @@
 KBUILD_CFLAGS += $(DISABLE_LTO)
 KASAN_SANITIZE := n
 
+# Prevents link failures: __sanitizer_cov_trace_pc() is not linked in.
+KCOV_INSTRUMENT		:= n
+
 VDSO64-$(CONFIG_X86_64)		:= y
 VDSOX32-$(CONFIG_X86_X32_ABI)	:= y
 VDSO32-$(CONFIG_X86_32)		:= y
@@ -12,6 +15,9 @@ VDSO32-$(CONFIG_IA32_EMULATION)	:= y
 
 # files to link into the vdso
 vobjs-y := vdso-note.o vclock_gettime.o vgetcpu.o
+GCC_PLUGINS_vdso-note.o		:= n
+GCC_PLUGINS_vclock_gettime.o	:= n
+GCC_PLUGINS_vgetcpu.o		:= n
 
 # files to link into kernel
 obj-y				+= vma.o
@@ -69,7 +75,7 @@ CFL := $(PROFILING) -mcmodel=small -fPIC -O2 -fasynchronous-unwind-tables -m64 \
        -fno-omit-frame-pointer -foptimize-sibling-calls \
        -DDISABLE_BRANCH_PROFILING -DBUILD_VDSO
 
-$(vobjs): KBUILD_CFLAGS += $(CFL)
+$(vobjs): KBUILD_CFLAGS := $(KBUILD_CFLAGS) $(CFL)
 
 #
 # vDSO code runs in userspace and -pg doesn't help with profiling anyway.
@@ -77,7 +83,13 @@ $(vobjs): KBUILD_CFLAGS += $(CFL)
 CFLAGS_REMOVE_vdso-note.o = -pg
 CFLAGS_REMOVE_vclock_gettime.o = -pg
 CFLAGS_REMOVE_vgetcpu.o = -pg
-CFLAGS_REMOVE_vvar.o = -pg
+
+#
+# disable retpoline instrumentation for the vDSO
+#
+CFLAGS_REMOVE_vdso-note.o += $(RETPOLINE_CFLAGS)
+CFLAGS_REMOVE_vclock_gettime.o += $(RETPOLINE_CFLAGS)
+CFLAGS_REMOVE_vgetcpu.o += $(RETPOLINE_CFLAGS)
 
 #
 # X32 processes use x32 vDSO to access 64bit kernel data.
@@ -162,7 +174,7 @@ quiet_cmd_vdso = VDSO    $@
 		       -Wl,-T,$(filter %.lds,$^) $(filter %.o,$^) && \
 		 sh $(srctree)/$(src)/checkundef.sh '$(NM)' '$@'
 
-VDSO_LDFLAGS = -fPIC -shared $(call cc-ldoption, -Wl$(comma)--hash-style=both) \
+VDSO_LDFLAGS = -fPIC -shared -Wl,--no-undefined $(call cc-ldoption, -Wl$(comma)--hash-style=both) \
 	$(call cc-ldoption, -Wl$(comma)--build-id) -Wl,-Bsymbolic $(LTO_CFLAGS)
 GCOV_PROFILE := n
 

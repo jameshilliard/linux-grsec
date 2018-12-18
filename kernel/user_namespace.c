@@ -84,6 +84,21 @@ int create_user_ns(struct cred *new)
 	    !kgid_has_mapping(parent_ns, group))
 		return -EPERM;
 
+#ifdef CONFIG_GRKERNSEC
+	/*
+	 * This doesn't really inspire confidence:
+	 * http://marc.info/?l=linux-kernel&m=135543612731939&w=2
+	 * http://marc.info/?l=linux-kernel&m=135545831607095&w=2
+	 * Increases kernel attack surface in areas developers
+	 * previously cared little about ("low importance due
+	 * to requiring "root" capability")
+	 * To be removed when this code receives *proper* review
+	 */
+	if (!capable(CAP_SYS_ADMIN) || !capable(CAP_SETUID) ||
+			!capable(CAP_SETGID))
+		return -EPERM;
+#endif
+
 	ns = kmem_cache_zalloc(user_ns_cachep, GFP_KERNEL);
 	if (!ns)
 		return -ENOMEM;
@@ -602,26 +617,17 @@ static ssize_t map_write(struct file *file, const char __user *buf,
 	struct uid_gid_map new_map;
 	unsigned idx;
 	struct uid_gid_extent *extent = NULL;
-	unsigned long page;
-	char *kbuf, *pos, *next_line;
+	char *kbuf = NULL, *pos, *next_line;
 	ssize_t ret;
 
 	/* Only allow < page size writes at the beginning of the file */
 	if ((*ppos != 0) || (count >= PAGE_SIZE))
 		return -EINVAL;
 
-	/* Get a buffer */
-	page = __get_free_page(GFP_TEMPORARY);
-	kbuf = (char *) page;
-	if (!page)
-		return -ENOMEM;
-
 	/* Slurp in the user data */
-	if (copy_from_user(kbuf, buf, count)) {
-		free_page(page);
-		return -EFAULT;
-	}
-	kbuf[count] = '\0';
+	kbuf = memdup_user_nul(buf, count);
+	if (IS_ERR(kbuf))
+		return PTR_ERR(kbuf);
 
 	/*
 	 * The userns_state_mutex serializes all writes to any given map.
@@ -755,8 +761,7 @@ static ssize_t map_write(struct file *file, const char __user *buf,
 	ret = count;
 out:
 	mutex_unlock(&userns_state_mutex);
-	if (page)
-		free_page(page);
+	kfree(kbuf);
 	return ret;
 }
 
@@ -980,7 +985,7 @@ static int userns_install(struct nsproxy *nsproxy, struct ns_common *ns)
 	if (!thread_group_empty(current))
 		return -EINVAL;
 
-	if (current->fs->users != 1)
+	if (atomic_read(&current->fs->users) != 1)
 		return -EINVAL;
 
 	if (!ns_capable(user_ns, CAP_SYS_ADMIN))

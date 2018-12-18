@@ -184,7 +184,7 @@ out:
 
 static struct kobj_attribute type_attr = __ATTR_RO(type);
 
-static struct bin_attribute data_attr = {
+static bin_attribute_no_const data_attr __read_only = {
 	.attr = {
 		.name = "data",
 		.mode = S_IRUGO,
@@ -299,7 +299,7 @@ static int __init create_setup_data_nodes(struct kobject *parent)
 	return 0;
 
 out_clean_nodes:
-	for (j = i - 1; j > 0; j--)
+	for (j = i - 1; j >= 0; j--)
 		cleanup_setup_data_node(*(kobjp + j));
 	kfree(kobjp);
 out_setup_data_kobj:

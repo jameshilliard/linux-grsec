@@ -88,9 +88,9 @@ static void adf_disable_msi(struct adf_accel_dev *accel_dev)
 	pci_disable_msi(pdev);
 }
 
-static void adf_pf2vf_bh_handler(void *data)
+static void adf_pf2vf_bh_handler(unsigned long data)
 {
-	struct adf_accel_dev *accel_dev = data;
+	struct adf_accel_dev *accel_dev = (struct adf_accel_dev *)data;
 	void __iomem *pmisc_bar_addr =
 		(&GET_BARS(accel_dev)[ADF_DH895XCCIOV_PMISC_BAR])->virt_addr;
 	u32 msg;
@@ -139,7 +139,7 @@ err:
 static int adf_setup_pf2vf_bh(struct adf_accel_dev *accel_dev)
 {
 	tasklet_init(&accel_dev->vf.pf2vf_bh_tasklet,
-		     (void *)adf_pf2vf_bh_handler, (unsigned long)accel_dev);
+		     adf_pf2vf_bh_handler, (unsigned long)accel_dev);
 
 	mutex_init(&accel_dev->vf.vf2pf_lock);
 	return 0;

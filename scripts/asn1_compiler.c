@@ -969,6 +969,7 @@ static struct element *parse_type(struct token **_cursor, struct token *end,
 
 	case DIRECTIVE_EXTERNAL:
 		element->method = ASN1_CONS;
+		/* FALLTHROUGH */
 
 	case DIRECTIVE_BMPString:
 	case DIRECTIVE_GeneralString:
@@ -1491,6 +1492,7 @@ static void render_element(FILE *out, struct element *e, struct element *tag)
 	case TYPE_REF:
 		if (e->class == ASN1_UNIV && e->method == ASN1_PRIM && e->tag == 0)
 			goto dont_render_tag;
+		/* FALLTHROUGH */
 	default:
 		render_opcode(out, "ASN1_OP_%sMATCH%s%s,",
 			      cond, act,

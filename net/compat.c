@@ -37,21 +37,16 @@ int get_compat_msghdr(struct msghdr *kmsg,
 		      struct sockaddr __user **save_addr,
 		      struct iovec **iov)
 {
-	compat_uptr_t uaddr, uiov, tmp3;
-	compat_size_t nr_segs;
+	struct compat_msghdr msg;
 	ssize_t err;
 
-	if (!access_ok(VERIFY_READ, umsg, sizeof(*umsg)) ||
-	    __get_user(uaddr, &umsg->msg_name) ||
-	    __get_user(kmsg->msg_namelen, &umsg->msg_namelen) ||
-	    __get_user(uiov, &umsg->msg_iov) ||
-	    __get_user(nr_segs, &umsg->msg_iovlen) ||
-	    __get_user(tmp3, &umsg->msg_control) ||
-	    __get_user(kmsg->msg_controllen, &umsg->msg_controllen) ||
-	    __get_user(kmsg->msg_flags, &umsg->msg_flags))
+	if (copy_from_user(&msg, umsg, sizeof(*umsg)))
 		return -EFAULT;
 
-	if (!uaddr)
+	kmsg->msg_flags = msg.msg_flags;
+	kmsg->msg_namelen = msg.msg_namelen;
+
+	if (!msg.msg_name)
 		kmsg->msg_namelen = 0;
 
 	if (kmsg->msg_namelen < 0)
@@ -59,14 +54,16 @@ int get_compat_msghdr(struct msghdr *kmsg,
 
 	if (kmsg->msg_namelen > sizeof(struct sockaddr_storage))
 		kmsg->msg_namelen = sizeof(struct sockaddr_storage);
-	kmsg->msg_control = compat_ptr(tmp3);
+
+	kmsg->msg_control = (void __force_kernel *)compat_ptr(msg.msg_control);
+	kmsg->msg_controllen = msg.msg_controllen;
 
 	if (save_addr)
-		*save_addr = compat_ptr(uaddr);
+		*save_addr = compat_ptr(msg.msg_name);
 
-	if (uaddr && kmsg->msg_namelen) {
+	if (msg.msg_name && kmsg->msg_namelen) {
 		if (!save_addr) {
-			err = move_addr_to_kernel(compat_ptr(uaddr),
+			err = move_addr_to_kernel(compat_ptr(msg.msg_name),
 						  kmsg->msg_namelen,
 						  kmsg->msg_name);
 			if (err < 0)
@@ -77,13 +74,13 @@ int get_compat_msghdr(struct msghdr *kmsg,
 		kmsg->msg_namelen = 0;
 	}
 
-	if (nr_segs > UIO_MAXIOV)
+	if (msg.msg_iovlen > UIO_MAXIOV)
 		return -EMSGSIZE;
 
 	kmsg->msg_iocb = NULL;
 
 	return compat_import_iovec(save_addr ? READ : WRITE,
-				   compat_ptr(uiov), nr_segs,
+				   compat_ptr(msg.msg_iov), msg.msg_iovlen,
 				   UIO_FASTIOV, iov, &kmsg->msg_iter);
 }
 
@@ -99,20 +96,20 @@ int get_compat_msghdr(struct msghdr *kmsg,
 
 #define CMSG_COMPAT_FIRSTHDR(msg)			\
 	(((msg)->msg_controllen) >= sizeof(struct compat_cmsghdr) ?	\
-	 (struct compat_cmsghdr __user *)((msg)->msg_control) :		\
+	 (struct compat_cmsghdr __force_user *)((msg)->msg_control) :		\
 	 (struct compat_cmsghdr __user *)NULL)
 
 #define CMSG_COMPAT_OK(ucmlen, ucmsg, mhdr) \
 	((ucmlen) >= sizeof(struct compat_cmsghdr) && \
 	 (ucmlen) <= (unsigned long) \
 	 ((mhdr)->msg_controllen - \
-	  ((char *)(ucmsg) - (char *)(mhdr)->msg_control)))
+	  ((char __force_kernel *)(ucmsg) - (char *)(mhdr)->msg_control)))
 
 static inline struct compat_cmsghdr __user *cmsg_compat_nxthdr(struct msghdr *msg,
 		struct compat_cmsghdr __user *cmsg, int cmsg_len)
 {
 	char __user *ptr = (char __user *)cmsg + CMSG_COMPAT_ALIGN(cmsg_len);
-	if ((unsigned long)(ptr + 1 - (char __user *)msg->msg_control) >
+	if ((unsigned long)(ptr + 1 - (char __force_user *)msg->msg_control) >
 			msg->msg_controllen)
 		return NULL;
 	return (struct compat_cmsghdr __user *)ptr;
@@ -187,6 +184,13 @@ int cmsghdr_from_user_compat_to_kern(struct msghdr *kmsg, struct sock *sk,
 		ucmsg = cmsg_compat_nxthdr(kmsg, ucmsg, ucmlen);
 	}
 
+	/*
+	 * check the length of messages copied in is the same as the
+	 * what we get from the first loop
+	 */
+	if ((char *)kcmsg - (char *)kcmsg_base != kcmlen)
+		goto Einval;
+
 	/* Ok, looks like we made it.  Hook it up and return success. */
 	kmsg->msg_control = kcmsg_base;
 	kmsg->msg_controllen = kcmlen;
@@ -202,7 +206,7 @@ Efault:
 
 int put_cmsg_compat(struct msghdr *kmsg, int level, int type, int len, void *data)
 {
-	struct compat_cmsghdr __user *cm = (struct compat_cmsghdr __user *) kmsg->msg_control;
+	struct compat_cmsghdr __user *cm = (struct compat_cmsghdr __force_user *) kmsg->msg_control;
 	struct compat_cmsghdr cmhdr;
 	struct compat_timeval ctv;
 	struct compat_timespec cts[3];
@@ -258,7 +262,7 @@ int put_cmsg_compat(struct msghdr *kmsg, int level, int type, int len, void *dat
 
 void scm_detach_fds_compat(struct msghdr *kmsg, struct scm_cookie *scm)
 {
-	struct compat_cmsghdr __user *cm = (struct compat_cmsghdr __user *) kmsg->msg_control;
+	struct compat_cmsghdr __user *cm = (struct compat_cmsghdr __force_user *) kmsg->msg_control;
 	int fdmax = (kmsg->msg_controllen - sizeof(struct compat_cmsghdr)) / sizeof(int);
 	int fdnum = scm->fp->count;
 	struct file **fp = scm->fp->fp;
@@ -346,7 +350,7 @@ static int do_set_sock_timeout(struct socket *sock, int level,
 		return -EFAULT;
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
-	err = sock_setsockopt(sock, level, optname, (char *)&ktime, sizeof(ktime));
+	err = sock_setsockopt(sock, level, optname, (char __force_user *)&ktime, sizeof(ktime));
 	set_fs(old_fs);
 
 	return err;
@@ -408,7 +412,7 @@ static int do_get_sock_timeout(struct socket *sock, int level, int optname,
 	len = sizeof(ktime);
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
-	err = sock_getsockopt(sock, level, optname, (char *) &ktime, &len);
+	err = sock_getsockopt(sock, level, optname, (char __force_user *) &ktime, (int __force_user *)&len);
 	set_fs(old_fs);
 
 	if (!err) {
@@ -552,7 +556,7 @@ int compat_mc_setsockopt(struct sock *sock, int level, int optname,
 	case MCAST_JOIN_GROUP:
 	case MCAST_LEAVE_GROUP:
 	{
-		struct compat_group_req __user *gr32 = (void *)optval;
+		struct compat_group_req __user *gr32 = (void __user *)optval;
 		struct group_req __user *kgr =
 			compat_alloc_user_space(sizeof(struct group_req));
 		u32 interface;
@@ -573,7 +577,7 @@ int compat_mc_setsockopt(struct sock *sock, int level, int optname,
 	case MCAST_BLOCK_SOURCE:
 	case MCAST_UNBLOCK_SOURCE:
 	{
-		struct compat_group_source_req __user *gsr32 = (void *)optval;
+		struct compat_group_source_req __user *gsr32 = (void __user *)optval;
 		struct group_source_req __user *kgsr = compat_alloc_user_space(
 			sizeof(struct group_source_req));
 		u32 interface;
@@ -594,7 +598,7 @@ int compat_mc_setsockopt(struct sock *sock, int level, int optname,
 	}
 	case MCAST_MSFILTER:
 	{
-		struct compat_group_filter __user *gf32 = (void *)optval;
+		struct compat_group_filter __user *gf32 = (void __user *)optval;
 		struct group_filter __user *kgf;
 		u32 interface, fmode, numsrc;
 
@@ -632,7 +636,7 @@ int compat_mc_getsockopt(struct sock *sock, int level, int optname,
 	char __user *optval, int __user *optlen,
 	int (*getsockopt)(struct sock *, int, int, char __user *, int __user *))
 {
-	struct compat_group_filter __user *gf32 = (void *)optval;
+	struct compat_group_filter __user *gf32 = (void __user *)optval;
 	struct group_filter __user *kgf;
 	int __user	*koptlen;
 	u32 interface, fmode, numsrc;

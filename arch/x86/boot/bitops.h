@@ -26,7 +26,7 @@ static inline int variable_test_bit(int nr, const void *addr)
 	u8 v;
 	const u32 *p = (const u32 *)addr;
 
-	asm("btl %2,%1; setc %0" : "=qm" (v) : "m" (*p), "Ir" (nr));
+	asm volatile("btl %2,%1; setc %0" : "=qm" (v) : "m" (*p), "Ir" (nr));
 	return v;
 }
 
@@ -37,7 +37,7 @@ static inline int variable_test_bit(int nr, const void *addr)
 
 static inline void set_bit(int nr, void *addr)
 {
-	asm("btsl %1,%0" : "+m" (*(u32 *)addr) : "Ir" (nr));
+	asm volatile("btsl %1,%0" : "+m" (*(u32 *)addr) : "Ir" (nr));
 }
 
 #endif /* BOOT_BITOPS_H */

@@ -630,15 +630,6 @@ static void print_ucode(struct ucode_cpu_info *uci)
 }
 #else
 
-/*
- * Flush global tlb. We only do this in x86_64 where paging has been enabled
- * already and PGE should be enabled as well.
- */
-static inline void flush_tlb_early(void)
-{
-	__native_flush_tlb_global_irq_disabled();
-}
-
 static inline void print_ucode(struct ucode_cpu_info *uci)
 {
 	struct microcode_intel *mc_intel;
@@ -674,10 +665,6 @@ static int apply_microcode_early(struct ucode_cpu_info *uci, bool early)
 	if (val[1] != mc_intel->hdr.rev)
 		return -1;
 
-#ifdef CONFIG_X86_64
-	/* Flush global tlb. This is precaution. */
-	flush_tlb_early();
-#endif
 	uci->cpu_sig.rev = val[1];
 
 	if (early)
@@ -1045,7 +1032,7 @@ static enum ucode_state request_microcode_fw(int cpu, struct device *device,
 
 static int get_ucode_user(void *to, const void *from, size_t n)
 {
-	return copy_from_user(to, from, n);
+	return copy_from_user(to, (const void __force_user *)from, n);
 }
 
 static enum ucode_state
@@ -1054,7 +1041,7 @@ request_microcode_user(int cpu, const void __user *buf, size_t size)
 	if (is_blacklisted(cpu))
 		return UCODE_NFOUND;
 
-	return generic_load_microcode(cpu, (void *)buf, size, &get_ucode_user);
+	return generic_load_microcode(cpu, (__force_kernel void *)buf, size, &get_ucode_user);
 }
 
 static void microcode_fini_cpu(int cpu)

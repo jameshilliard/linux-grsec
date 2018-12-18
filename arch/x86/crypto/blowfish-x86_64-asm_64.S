@@ -21,6 +21,7 @@
  */
 
 #include <linux/linkage.h>
+#include <asm/nospec-branch.h>
 
 .file "blowfish-x86_64-asm.S"
 .text
@@ -149,13 +150,15 @@ ENTRY(__blowfish_enc_blk)
 	jnz .L__enc_xor;
 
 	write_block();
+	pax_force_retaddr
 	ret;
 .L__enc_xor:
 	xor_block();
+	pax_force_retaddr
 	ret;
 ENDPROC(__blowfish_enc_blk)
 
-ENTRY(blowfish_dec_blk)
+RAP_ENTRY(blowfish_dec_blk)
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -183,6 +186,7 @@ ENTRY(blowfish_dec_blk)
 
 	movq %r11, %rbp;
 
+	pax_force_retaddr
 	ret;
 ENDPROC(blowfish_dec_blk)
 
@@ -334,6 +338,7 @@ ENTRY(__blowfish_enc_blk_4way)
 
 	popq %rbx;
 	popq %rbp;
+	pax_force_retaddr
 	ret;
 
 .L__enc_xor4:
@@ -341,10 +346,11 @@ ENTRY(__blowfish_enc_blk_4way)
 
 	popq %rbx;
 	popq %rbp;
+	pax_force_retaddr
 	ret;
 ENDPROC(__blowfish_enc_blk_4way)
 
-ENTRY(blowfish_dec_blk_4way)
+RAP_ENTRY(blowfish_dec_blk_4way)
 	/* input:
 	 *	%rdi: ctx, CTX
 	 *	%rsi: dst
@@ -375,5 +381,6 @@ ENTRY(blowfish_dec_blk_4way)
 	popq %rbx;
 	popq %rbp;
 
+	pax_force_retaddr
 	ret;
 ENDPROC(blowfish_dec_blk_4way)

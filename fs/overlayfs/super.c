@@ -177,7 +177,7 @@ void ovl_path_lower(struct dentry *dentry, struct path *path)
 {
 	struct ovl_entry *oe = dentry->d_fsdata;
 
-	*path = oe->numlower ? oe->lowerstack[0] : (struct path) { NULL, NULL };
+	*path = oe->numlower ? oe->lowerstack[0] : (struct path) { .dentry = NULL, .mnt = NULL };
 }
 
 int ovl_want_write(struct dentry *dentry)
@@ -947,8 +947,8 @@ static unsigned int ovl_split_lowerdirs(char *str)
 
 static int ovl_fill_super(struct super_block *sb, void *data, int silent)
 {
-	struct path upperpath = { NULL, NULL };
-	struct path workpath = { NULL, NULL };
+	struct path upperpath = { .dentry = NULL, .mnt = NULL };
+	struct path workpath = { .dentry = NULL, .mnt = NULL };
 	struct dentry *root_dentry;
 	struct ovl_entry *oe;
 	struct ovl_fs *ufs;

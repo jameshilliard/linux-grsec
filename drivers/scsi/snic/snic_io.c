@@ -228,6 +228,8 @@ snic_req_init(struct snic *snic, int sg_cnt)
 
 	if (sg_cnt == 0)
 		goto end;
+	if (sg_cnt > SNIC_MAX_SG_DESC_CNT)
+		goto end;
 
 	rqi->req_len += (sg_cnt * sizeof(struct snic_sg_desc));
 
@@ -235,7 +237,7 @@ snic_req_init(struct snic *snic, int sg_cnt)
 		atomic64_set(&snic->s_stats.io.max_sgl, sg_cnt);
 
 	SNIC_BUG_ON(sg_cnt > SNIC_MAX_SG_DESC_CNT);
-	atomic64_inc(&snic->s_stats.io.sgl_cnt[sg_cnt - 1]);
+	atomic64_inc_unchecked(&snic->s_stats.io.sgl_cnt[sg_cnt - 1]);
 
 end:
 	memset(rqi->req, 0, rqi->req_len);

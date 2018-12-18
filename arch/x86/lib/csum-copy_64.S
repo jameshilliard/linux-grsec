@@ -8,6 +8,7 @@
 #include <linux/linkage.h>
 #include <asm/errno.h>
 #include <asm/asm.h>
+#include <asm/nospec-branch.h>
 
 /*
  * Checksum copy with exception handling.
@@ -46,13 +47,8 @@
 
 
 ENTRY(csum_partial_copy_generic)
-	cmpl	$3*64, %edx
-	jle	.Lignore
-
-.Lignore:
 	subq  $7*8, %rsp
 	movq  %rbx, 2*8(%rsp)
-	movq  %r12, 3*8(%rsp)
 	movq  %r14, 4*8(%rsp)
 	movq  %r13, 5*8(%rsp)
 	movq  %r15, 6*8(%rsp)
@@ -63,17 +59,16 @@ ENTRY(csum_partial_copy_generic)
 	movl  %ecx, %eax
 	movl  %edx, %ecx
 
-	xorl  %r9d, %r9d
-	movq  %rcx, %r12
+	movq  %rcx, %r9
 
-	shrq  $6, %r12
+	shrq  $6, %r9
 	jz	.Lhandle_tail       /* < 64 */
 
 	clc
 
 	/* main loop. clear in 64 byte blocks */
-	/* r9: zero, r8: temp2, rbx: temp1, rax: sum, rcx: saved length */
-	/* r11:	temp3, rdx: temp4, r12 loopcnt */
+	/* r8: temp2, rbx: temp1, rax: sum, rcx: saved length */
+	/* r11:	temp3, rdx: temp4, r9 loopcnt */
 	/* r10:	temp5, r15: temp6, r14 temp7, r13 temp8 */
 	.p2align 4
 .Lloop:
@@ -107,7 +102,7 @@ ENTRY(csum_partial_copy_generic)
 	adcq  %r14, %rax
 	adcq  %r13, %rax
 
-	decl %r12d
+	decl %r9d
 
 	dest
 	movq %rbx, (%rsi)
@@ -134,7 +129,7 @@ ENTRY(csum_partial_copy_generic)
 
 	jnz	.Lloop
 
-	adcq  %r9, %rax
+	adcq  $0, %rax
 
 	/* do last up to 56 bytes */
 .Lhandle_tail:
@@ -155,14 +150,14 @@ ENTRY(csum_partial_copy_generic)
 	leaq 8(%rsi), %rsi /* preserve carry */
 	leaq 8(%rdi), %rdi
 	jnz	.Lloop_8
-	adcq %r9, %rax	/* add in carry */
+	adcq $0, %rax	/* add in carry */
 
 .Lfold:
 	/* reduce checksum to 32bits */
 	movl %eax, %ebx
 	shrq $32, %rax
 	addl %ebx, %eax
-	adcl %r9d, %eax
+	adcl $0, %eax
 
 	/* do last up to 6 bytes */
 .Lhandle_7:
@@ -184,7 +179,7 @@ ENTRY(csum_partial_copy_generic)
 	leaq 2(%rdi), %rdi
 	leaq 2(%rsi), %rsi
 	jnz .Lloop_1
-	adcl %r9d, %eax	/* add in carry */
+	adcl $0, %eax	/* add in carry */
 
 	/* handle last odd byte */
 .Lhandle_1:
@@ -196,15 +191,15 @@ ENTRY(csum_partial_copy_generic)
 	dest
 	movb %bl, (%rsi)
 	addl %ebx, %eax
-	adcl %r9d, %eax		/* carry */
+	adcl $0, %eax		/* carry */
 
 .Lende:
 	movq 2*8(%rsp), %rbx
-	movq 3*8(%rsp), %r12
 	movq 4*8(%rsp), %r14
 	movq 5*8(%rsp), %r13
 	movq 6*8(%rsp), %r15
 	addq $7*8, %rsp
+	pax_force_retaddr
 	ret
 
 	/* Exception handlers. Very simple, zeroing is done in the wrappers */

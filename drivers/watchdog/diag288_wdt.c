@@ -119,13 +119,13 @@ static int wdt_start(struct watchdog_device *dev)
 		ebc_cmd = kmalloc(MAX_CMDLEN, GFP_KERNEL);
 		if (!ebc_cmd)
 			return -ENOMEM;
-		len = strlcpy(ebc_cmd, wdt_cmd, MAX_CMDLEN);
+		strlcpy(ebc_cmd, wdt_cmd, MAX_CMDLEN);
 		ASCEBC(ebc_cmd, MAX_CMDLEN);
 		EBC_TOUPPER(ebc_cmd, MAX_CMDLEN);
 
 		func = conceal_on ? (WDT_FUNC_INIT | WDT_FUNC_CONCEAL)
 			: WDT_FUNC_INIT;
-		ret = __diag288_vm(func, dev->timeout, ebc_cmd, len);
+		ret = __diag288_vm(func, dev->timeout, ebc_cmd, strlen(ebc_cmd));
 		WARN_ON(ret != 0);
 		kfree(ebc_cmd);
 	} else {
@@ -162,7 +162,7 @@ static int wdt_ping(struct watchdog_device *dev)
 		ebc_cmd = kmalloc(MAX_CMDLEN, GFP_KERNEL);
 		if (!ebc_cmd)
 			return -ENOMEM;
-		len = strlcpy(ebc_cmd, wdt_cmd, MAX_CMDLEN);
+		len = strlcpy_check(ebc_cmd, wdt_cmd, MAX_CMDLEN);
 		ASCEBC(ebc_cmd, MAX_CMDLEN);
 		EBC_TOUPPER(ebc_cmd, MAX_CMDLEN);
 

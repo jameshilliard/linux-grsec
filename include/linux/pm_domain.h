@@ -35,7 +35,7 @@ struct gpd_dev_ops {
 	int (*save_state)(struct device *dev);
 	int (*restore_state)(struct device *dev);
 	bool (*active_wakeup)(struct device *dev);
-};
+} __no_const;
 
 struct generic_pm_domain {
 	struct dev_pm_domain domain;	/* PM domain operations */

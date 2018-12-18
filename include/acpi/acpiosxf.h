@@ -49,6 +49,14 @@
 #include <acpi/platform/acenv.h>
 #include <acpi/actypes.h>
 
+#ifndef __printf
+# define __printf(a, b)
+#endif
+
+#ifndef __nocapture
+# define __nocapture(...)
+#endif
+
 /* Types for acpi_os_execute */
 
 typedef enum {
@@ -337,11 +345,12 @@ acpi_status acpi_os_signal(u32 function, void *info);
  * Debug print routines
  */
 #ifndef ACPI_USE_ALTERNATE_PROTOTYPE_acpi_os_printf
+__printf(1, 2)
 void ACPI_INTERNAL_VAR_XFACE acpi_os_printf(const char *format, ...);
 #endif
 
 #ifndef ACPI_USE_ALTERNATE_PROTOTYPE_acpi_os_vprintf
-void acpi_os_vprintf(const char *format, va_list args);
+__printf(1, 0) void acpi_os_vprintf(const char *format, va_list args);
 #endif
 
 #ifndef ACPI_USE_ALTERNATE_PROTOTYPE_acpi_os_redirect_output

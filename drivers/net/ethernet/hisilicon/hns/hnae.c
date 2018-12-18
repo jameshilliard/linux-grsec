@@ -329,8 +329,10 @@ struct hnae_handle *hnae_get_handle(struct device *owner_dev,
 		return ERR_PTR(-ENODEV);
 
 	handle = dev->ops->get_handle(dev, port_id);
-	if (IS_ERR(handle))
+	if (IS_ERR(handle)) {
+		put_device(&dev->cls_dev);
 		return handle;
+	}
 
 	handle->dev = dev;
 	handle->owner_dev = owner_dev;
@@ -353,6 +355,8 @@ out_when_init_queue:
 	for (j = i - 1; j >= 0; j--)
 		hnae_fini_queue(handle->qs[j]);
 
+	put_device(&dev->cls_dev);
+
 	return ERR_PTR(-ENOMEM);
 }
 EXPORT_SYMBOL(hnae_get_handle);
@@ -374,6 +378,8 @@ void hnae_put_handle(struct hnae_handle *h)
 		dev->ops->put_handle(h);
 
 	module_put(dev->owner);
+
+	put_device(&dev->cls_dev);
 }
 EXPORT_SYMBOL(hnae_put_handle);
 
@@ -389,7 +395,7 @@ static void hnae_release(struct device *dev)
  */
 int hnae_ae_register(struct hnae_ae_dev *hdev, struct module *owner)
 {
-	static atomic_t id = ATOMIC_INIT(-1);
+	static atomic_unchecked_t id = ATOMIC_INIT(-1);
 	int ret;
 
 	if (!hdev->dev)
@@ -402,7 +408,7 @@ int hnae_ae_register(struct hnae_ae_dev *hdev, struct module *owner)
 		return -EINVAL;
 
 	hdev->owner = owner;
-	hdev->id = (int)atomic_inc_return(&id);
+	hdev->id = (int)atomic_inc_return_unchecked(&id);
 	hdev->cls_dev.parent = hdev->dev;
 	hdev->cls_dev.class = hnae_class;
 	hdev->cls_dev.release = hnae_release;

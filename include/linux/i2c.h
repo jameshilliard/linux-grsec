@@ -412,6 +412,7 @@ struct i2c_algorithm {
 	int (*unreg_slave)(struct i2c_client *client);
 #endif
 };
+typedef struct i2c_algorithm __no_const i2c_algorithm_no_const;
 
 /**
  * struct i2c_bus_recovery_info - I2C bus recovery information

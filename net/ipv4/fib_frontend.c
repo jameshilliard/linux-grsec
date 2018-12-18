@@ -628,6 +628,8 @@ const struct nla_policy rtm_ipv4_policy[RTA_MAX + 1] = {
 	[RTA_FLOW]		= { .type = NLA_U32 },
 	[RTA_ENCAP_TYPE]	= { .type = NLA_U16 },
 	[RTA_ENCAP]		= { .type = NLA_NESTED },
+	[RTA_MARK]		= { .type = NLA_U32 },
+	[RTA_TABLE]		= { .type = NLA_U32 },
 };
 
 static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
@@ -1148,12 +1150,12 @@ static int fib_inetaddr_event(struct notifier_block *this, unsigned long event, 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 		fib_sync_up(dev, RTNH_F_DEAD);
 #endif
-		atomic_inc(&net->ipv4.dev_addr_genid);
+		atomic_inc_unchecked(&net->ipv4.dev_addr_genid);
 		rt_cache_flush(dev_net(dev));
 		break;
 	case NETDEV_DOWN:
 		fib_del_ifaddr(ifa, NULL);
-		atomic_inc(&net->ipv4.dev_addr_genid);
+		atomic_inc_unchecked(&net->ipv4.dev_addr_genid);
 		if (!ifa->ifa_dev->ifa_list) {
 			/* Last address was deleted from this interface.
 			 * Disable IP.
@@ -1194,7 +1196,7 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 		fib_sync_up(dev, RTNH_F_DEAD);
 #endif
-		atomic_inc(&net->ipv4.dev_addr_genid);
+		atomic_inc_unchecked(&net->ipv4.dev_addr_genid);
 		rt_cache_flush(net);
 		break;
 	case NETDEV_DOWN:

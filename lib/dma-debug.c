@@ -982,7 +982,7 @@ static int dma_debug_device_change(struct notifier_block *nb, unsigned long acti
 
 void dma_debug_add_bus(struct bus_type *bus)
 {
-	struct notifier_block *nb;
+	notifier_block_no_const *nb;
 
 	if (dma_debug_disabled())
 		return;
@@ -1164,7 +1164,7 @@ static void check_unmap(struct dma_debug_entry *ref)
 
 static void check_for_stack(struct device *dev, void *addr)
 {
-	if (object_is_on_stack(addr))
+	if (object_starts_on_stack(addr))
 		err_printk(dev, NULL, "DMA-API: device driver maps memory from "
 				"stack [addr=%p]\n", addr);
 }

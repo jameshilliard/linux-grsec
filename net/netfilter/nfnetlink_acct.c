@@ -28,8 +28,8 @@ MODULE_AUTHOR("Pablo Neira Ayuso <pablo@netfilter.org>");
 MODULE_DESCRIPTION("nfacct: Extended Netfilter accounting infrastructure");
 
 struct nf_acct {
-	atomic64_t		pkts;
-	atomic64_t		bytes;
+	atomic64_unchecked_t	pkts;
+	atomic64_unchecked_t	bytes;
 	unsigned long		flags;
 	struct list_head	head;
 	atomic_t		refcnt;
@@ -77,8 +77,8 @@ nfnl_acct_new(struct sock *nfnl, struct sk_buff *skb,
 	if (matching) {
 		if (nlh->nlmsg_flags & NLM_F_REPLACE) {
 			/* reset counters if you request a replacement. */
-			atomic64_set(&matching->pkts, 0);
-			atomic64_set(&matching->bytes, 0);
+			atomic64_set_unchecked(&matching->pkts, 0);
+			atomic64_set_unchecked(&matching->bytes, 0);
 			smp_mb__before_atomic();
 			/* reset overquota flag if quota is enabled. */
 			if ((matching->flags & NFACCT_F_QUOTA))
@@ -112,14 +112,14 @@ nfnl_acct_new(struct sock *nfnl, struct sk_buff *skb,
 		nfacct->flags = flags;
 	}
 
-	strncpy(nfacct->name, nla_data(tb[NFACCT_NAME]), NFACCT_NAME_MAX);
+	nla_strlcpy(nfacct->name, tb[NFACCT_NAME], NFACCT_NAME_MAX);
 
 	if (tb[NFACCT_BYTES]) {
-		atomic64_set(&nfacct->bytes,
+		atomic64_set_unchecked(&nfacct->bytes,
 			     be64_to_cpu(nla_get_be64(tb[NFACCT_BYTES])));
 	}
 	if (tb[NFACCT_PKTS]) {
-		atomic64_set(&nfacct->pkts,
+		atomic64_set_unchecked(&nfacct->pkts,
 			     be64_to_cpu(nla_get_be64(tb[NFACCT_PKTS])));
 	}
 	atomic_set(&nfacct->refcnt, 1);
@@ -152,14 +152,14 @@ nfnl_acct_fill_info(struct sk_buff *skb, u32 portid, u32 seq, u32 type,
 
 	old_flags = acct->flags;
 	if (type == NFNL_MSG_ACCT_GET_CTRZERO) {
-		pkts = atomic64_xchg(&acct->pkts, 0);
-		bytes = atomic64_xchg(&acct->bytes, 0);
+		pkts = atomic64_xchg_unchecked(&acct->pkts, 0);
+		bytes = atomic64_xchg_unchecked(&acct->bytes, 0);
 		smp_mb__before_atomic();
 		if (acct->flags & NFACCT_F_QUOTA)
 			clear_bit(NFACCT_OVERQUOTA_BIT, &acct->flags);
 	} else {
-		pkts = atomic64_read(&acct->pkts);
-		bytes = atomic64_read(&acct->bytes);
+		pkts = atomic64_read_unchecked(&acct->pkts);
+		bytes = atomic64_read_unchecked(&acct->bytes);
 	}
 	if (nla_put_be64(skb, NFACCT_PKTS, cpu_to_be64(pkts)) ||
 	    nla_put_be64(skb, NFACCT_BYTES, cpu_to_be64(bytes)) ||
@@ -263,10 +263,11 @@ nfnl_acct_get(struct sock *nfnl, struct sk_buff *skb,
 	char *acct_name;
 
 	if (nlh->nlmsg_flags & NLM_F_DUMP) {
-		struct netlink_dump_control c = {
+		static struct netlink_dump_control c = {
 			.dump = nfnl_acct_dump,
 			.done = nfnl_acct_done,
 		};
+		void *data = NULL;
 
 		if (tb[NFACCT_FILTER]) {
 			struct nfacct_filter *filter;
@@ -275,9 +276,9 @@ nfnl_acct_get(struct sock *nfnl, struct sk_buff *skb,
 			if (IS_ERR(filter))
 				return PTR_ERR(filter);
 
-			c.data = filter;
+			data = filter;
 		}
-		return netlink_dump_start(nfnl, skb, nlh, &c);
+		return __netlink_dump_start(nfnl, skb, nlh, &c, data, THIS_MODULE);
 	}
 
 	if (!tb[NFACCT_NAME])
@@ -320,14 +321,14 @@ static int nfnl_acct_try_del(struct nf_acct *cur)
 {
 	int ret = 0;
 
-	/* we want to avoid races with nfnl_acct_find_get. */
-	if (atomic_dec_and_test(&cur->refcnt)) {
+	/* We want to avoid races with nfnl_acct_put. So only when the current
+	 * refcnt is 1, we decrease it to 0.
+	 */
+	if (atomic_cmpxchg(&cur->refcnt, 1, 0) == 1) {
 		/* We are protected by nfnl mutex. */
 		list_del_rcu(&cur->head);
 		kfree_rcu(cur, rcu_head);
 	} else {
-		/* still in use, restore reference counter. */
-		atomic_inc(&cur->refcnt);
 		ret = -EBUSY;
 	}
 	return ret;
@@ -339,18 +340,18 @@ nfnl_acct_del(struct sock *nfnl, struct sk_buff *skb,
 {
 	struct net *net = sock_net(nfnl);
 	char *acct_name;
-	struct nf_acct *cur;
+	struct nf_acct *cur, *tmp;
 	int ret = -ENOENT;
 
 	if (!tb[NFACCT_NAME]) {
-		list_for_each_entry(cur, &net->nfnl_acct_list, head)
+		list_for_each_entry_safe(cur, tmp, &net->nfnl_acct_list, head)
 			nfnl_acct_try_del(cur);
 
 		return 0;
 	}
 	acct_name = nla_data(tb[NFACCT_NAME]);
 
-	list_for_each_entry(cur, &net->nfnl_acct_list, head) {
+	list_for_each_entry_safe(cur, tmp, &net->nfnl_acct_list, head) {
 		if (strncmp(cur->name, acct_name, NFACCT_NAME_MAX) != 0)
 			continue;
 
@@ -433,8 +434,8 @@ EXPORT_SYMBOL_GPL(nfnl_acct_put);
 
 void nfnl_acct_update(const struct sk_buff *skb, struct nf_acct *nfacct)
 {
-	atomic64_inc(&nfacct->pkts);
-	atomic64_add(skb->len, &nfacct->bytes);
+	atomic64_inc_unchecked(&nfacct->pkts);
+	atomic64_add_unchecked(skb->len, &nfacct->bytes);
 }
 EXPORT_SYMBOL_GPL(nfnl_acct_update);
 
@@ -469,7 +470,7 @@ int nfnl_acct_overquota(const struct sk_buff *skb, struct nf_acct *nfacct)
 
 	quota = (u64 *)nfacct->data;
 	now = (nfacct->flags & NFACCT_F_QUOTA_PKTS) ?
-	       atomic64_read(&nfacct->pkts) : atomic64_read(&nfacct->bytes);
+	       atomic64_read_unchecked(&nfacct->pkts) : atomic64_read_unchecked(&nfacct->bytes);
 
 	ret = now > *quota;
 

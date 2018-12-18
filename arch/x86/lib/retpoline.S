@@ -4,7 +4,6 @@
 #include <linux/linkage.h>
 #include <asm/dwarf2.h>
 #include <asm/cpufeatures.h>
-#include <asm/alternative-asm.h>
 #include <asm-generic/export.h>
 #include <asm/nospec-branch.h>
 
@@ -13,10 +12,18 @@
 
 ENTRY(__x86_indirect_thunk_\reg)
 	CFI_STARTPROC
-	JMP_NOSPEC %\reg
+	JMP_NOSPEC_INLINE %\reg
 	CFI_ENDPROC
 ENDPROC(__x86_indirect_thunk_\reg)
 .endm
+
+ENTRY(__x86_return_thunk)
+	CFI_STARTPROC
+	RET_NOSPEC
+	CFI_ENDPROC
+ENDPROC(__x86_return_thunk)
+_ASM_NOKPROBE(__x86_return_thunk)
+EXPORT_SYMBOL(__x86_return_thunk)
 
 /*
  * Despite being an assembler file we can't just use .irp here

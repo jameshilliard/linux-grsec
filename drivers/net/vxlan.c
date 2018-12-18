@@ -246,11 +246,11 @@ static struct vxlan_sock *vxlan_find_sock(struct net *net, sa_family_t family,
 
 static struct vxlan_dev *vxlan_vs_find_vni(struct vxlan_sock *vs, u32 id)
 {
-	struct vxlan_dev *vxlan;
+	struct vxlan_dev_node *node;
 
-	hlist_for_each_entry_rcu(vxlan, vni_head(vs, id), hlist) {
-		if (vxlan->default_dst.remote_vni == id)
-			return vxlan;
+	hlist_for_each_entry_rcu(node, vni_head(vs, id), hlist) {
+		if (node->vxlan->default_dst.remote_vni == id)
+			return node->vxlan;
 	}
 
 	return NULL;
@@ -2264,17 +2264,22 @@ static void vxlan_vs_del_dev(struct vxlan_dev *vxlan)
 	struct vxlan_net *vn = net_generic(vxlan->net, vxlan_net_id);
 
 	spin_lock(&vn->sock_lock);
-	hlist_del_init_rcu(&vxlan->hlist);
+	hlist_del_init_rcu(&vxlan->hlist4.hlist);
+#if IS_ENABLED(CONFIG_IPV6)
+	hlist_del_init_rcu(&vxlan->hlist6.hlist);
+#endif
 	spin_unlock(&vn->sock_lock);
 }
 
-static void vxlan_vs_add_dev(struct vxlan_sock *vs, struct vxlan_dev *vxlan)
+static void vxlan_vs_add_dev(struct vxlan_sock *vs, struct vxlan_dev *vxlan,
+			     struct vxlan_dev_node *node)
 {
 	struct vxlan_net *vn = net_generic(vxlan->net, vxlan_net_id);
 	__u32 vni = vxlan->default_dst.remote_vni;
 
+	node->vxlan = vxlan;
 	spin_lock(&vn->sock_lock);
-	hlist_add_head_rcu(&vxlan->hlist, vni_head(vs, vni));
+	hlist_add_head_rcu(&node->hlist, vni_head(vs, vni));
 	spin_unlock(&vn->sock_lock);
 }
 
@@ -2734,6 +2739,7 @@ static int __vxlan_sock_add(struct vxlan_dev *vxlan, bool ipv6)
 {
 	struct vxlan_net *vn = net_generic(vxlan->net, vxlan_net_id);
 	struct vxlan_sock *vs = NULL;
+	struct vxlan_dev_node *node;
 
 	if (!vxlan->cfg.no_share) {
 		spin_lock(&vn->sock_lock);
@@ -2751,12 +2757,16 @@ static int __vxlan_sock_add(struct vxlan_dev *vxlan, bool ipv6)
 	if (IS_ERR(vs))
 		return PTR_ERR(vs);
 #if IS_ENABLED(CONFIG_IPV6)
-	if (ipv6)
-		vxlan->vn6_sock = vs;
-	else
+	if (ipv6) {
+		rcu_assign_pointer(vxlan->vn6_sock, vs);
+		node = &vxlan->hlist6;
+	} else
 #endif
-		vxlan->vn4_sock = vs;
-	vxlan_vs_add_dev(vs, vxlan);
+	{
+		rcu_assign_pointer(vxlan->vn4_sock, vs);
+		node = &vxlan->hlist4;
+	}
+	vxlan_vs_add_dev(vs, vxlan, node);
 	return 0;
 }
 
@@ -3174,7 +3184,7 @@ static struct net *vxlan_get_link_net(const struct net_device *dev)
 	return vxlan->net;
 }
 
-static struct rtnl_link_ops vxlan_link_ops __read_mostly = {
+static struct rtnl_link_ops vxlan_link_ops = {
 	.kind		= "vxlan",
 	.maxtype	= IFLA_VXLAN_MAX,
 	.policy		= vxlan_policy,
@@ -3222,7 +3232,7 @@ static int vxlan_lowerdev_event(struct notifier_block *unused,
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block vxlan_notifier_block __read_mostly = {
+static struct notifier_block vxlan_notifier_block = {
 	.notifier_call = vxlan_lowerdev_event,
 };
 

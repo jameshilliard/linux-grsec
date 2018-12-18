@@ -417,11 +417,7 @@ void tcp_clear_retrans(struct tcp_sock *tp);
 void tcp_update_metrics(struct sock *sk);
 void tcp_init_metrics(struct sock *sk);
 void tcp_metrics_init(void);
-bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst,
-			bool paws_check, bool timestamps);
-bool tcp_remember_stamp(struct sock *sk);
-bool tcp_tw_remember_stamp(struct inet_timewait_sock *tw);
-void tcp_fetch_timewait_stamp(struct sock *sk, struct dst_entry *dst);
+bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst);
 void tcp_disable_fack(struct tcp_sock *tp);
 void tcp_close(struct sock *sk, long timeout);
 void tcp_init_sock(struct sock *sk);
@@ -477,7 +473,7 @@ void inet_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb);
 /* From syncookies.c */
 struct sock *tcp_get_cookie_sock(struct sock *sk, struct sk_buff *skb,
 				 struct request_sock *req,
-				 struct dst_entry *dst);
+				 struct dst_entry *dst, u32 tsoff);
 int __cookie_v4_check(const struct iphdr *iph, const struct tcphdr *th,
 		      u32 cookie);
 struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb);
@@ -551,7 +547,7 @@ void tcp_retransmit_timer(struct sock *sk);
 void tcp_xmit_retransmit_queue(struct sock *);
 void tcp_simple_retransmit(struct sock *);
 int tcp_trim_head(struct sock *, struct sk_buff *, u32);
-int tcp_fragment(struct sock *, struct sk_buff *, u32, unsigned int, gfp_t);
+int tcp_fragment(struct sock *, struct sk_buff *, u32, unsigned int, gfp_t) __intentional_overflow(3);
 
 void tcp_send_probe0(struct sock *);
 void tcp_send_partial(struct sock *);
@@ -738,8 +734,8 @@ static inline u32 tcp_skb_timestamp(const struct sk_buff *skb)
  * If this grows please adjust skbuff.h:skbuff->cb[xxx] size appropriately.
  */
 struct tcp_skb_cb {
-	__u32		seq;		/* Starting sequence number	*/
-	__u32		end_seq;	/* SEQ + FIN + SYN + datalen	*/
+	__u32		seq __intentional_overflow(-1);	/* Starting sequence number	*/
+	__u32		end_seq __intentional_overflow(-1);	/* SEQ + FIN + SYN + datalen	*/
 	union {
 		/* Note : tcp_tw_isn is used in input path only
 		 *	  (isn chosen by tcp_timewait_state_process())
@@ -767,7 +763,7 @@ struct tcp_skb_cb {
 
 	__u8		ip_dsfield;	/* IPv4 tos or IPv6 dsfield	*/
 	/* 1 byte hole */
-	__u32		ack_seq;	/* Sequence number ACK'd	*/
+	__u32		ack_seq __intentional_overflow(-1);	/* Sequence number ACK'd	*/
 	union {
 		struct inet_skb_parm	h4;
 #if IS_ENABLED(CONFIG_IPV6)
@@ -1726,9 +1722,9 @@ struct tcp_request_sock_ops {
 				 __u16 *mss);
 #endif
 	struct dst_entry *(*route_req)(const struct sock *sk, struct flowi *fl,
-				       const struct request_sock *req,
-				       bool *strict);
-	__u32 (*init_seq)(const struct sk_buff *skb);
+				       const struct request_sock *req);
+	u32 (*init_seq)(const struct sk_buff *skb);
+	u32 (*init_ts_off)(const struct sk_buff *skb);
 	int (*send_synack)(const struct sock *sk, struct dst_entry *dst,
 			   struct flowi *fl, struct request_sock *req,
 			   struct tcp_fastopen_cookie *foc,

@@ -230,7 +230,8 @@ struct super_block *freeze_bdev(struct block_device *bdev)
 		 * thaw_bdev drops it.
 		 */
 		sb = get_super(bdev);
-		drop_super(sb);
+		if (sb)
+			drop_super(sb);
 		mutex_unlock(&bdev->bd_fsfreeze_mutex);
 		return sb;
 	}
@@ -437,10 +438,12 @@ int bdev_write_page(struct block_device *bdev, sector_t sector,
 
 	set_page_writeback(page);
 	result = ops->rw_page(bdev, sector + get_start_sect(bdev), page, rw);
-	if (result)
+	if (result) {
 		end_page_writeback(page);
-	else
+	} else {
+		clean_page_buffers(page);
 		unlock_page(page);
+	}
 	blk_queue_exit(bdev->bd_queue);
 	return result;
 }
@@ -761,7 +764,7 @@ static bool bd_may_claim(struct block_device *bdev, struct block_device *whole,
 	else if (whole == bdev)
 		return true;  	 /* is a whole device which isn't held */
 
-	else if (whole->bd_holder == bd_may_claim)
+	else if (whole->bd_holder == (void *)bd_may_claim)
 		return true; 	 /* is a partition of a device that is being partitioned */
 	else if (whole->bd_holder != NULL)
 		return false;	 /* is a partition of a held device */

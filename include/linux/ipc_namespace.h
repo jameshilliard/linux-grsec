@@ -60,7 +60,7 @@ struct ipc_namespace {
 	struct user_namespace *user_ns;
 
 	struct ns_common ns;
-};
+} __randomize_layout;
 
 extern struct ipc_namespace init_ipc_ns;
 extern atomic_t nr_ipc_ns;

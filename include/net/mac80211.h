@@ -1507,7 +1507,7 @@ enum ieee80211_key_flags {
  * @iv_len: The IV length for this key type
  */
 struct ieee80211_key_conf {
-	atomic64_t tx_pn;
+	atomic64_unchecked_t tx_pn;
 	u32 cipher;
 	u8 icv_len;
 	u8 iv_len;
@@ -5174,7 +5174,7 @@ struct ieee80211_tx_rate_control {
 	struct sk_buff *skb;
 	struct ieee80211_tx_rate reported_rate;
 	bool rts, short_preamble;
-	u8 max_rate_idx;
+	s8 max_rate_idx;
 	u32 rate_idx_mask;
 	u8 *rate_idx_mcs_mask;
 	bool bss;
@@ -5211,7 +5211,7 @@ struct rate_control_ops {
 	void (*remove_sta_debugfs)(void *priv, void *priv_sta);
 
 	u32 (*get_expected_throughput)(void *priv_sta);
-};
+} __do_const;
 
 static inline int rate_supported(struct ieee80211_sta *sta,
 				 enum ieee80211_band band,

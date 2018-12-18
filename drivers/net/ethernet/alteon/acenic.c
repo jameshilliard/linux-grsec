@@ -1010,9 +1010,9 @@ static int ace_init(struct net_device *dev)
 		printk(KERN_INFO "  PCI cache line size set incorrectly "
 		       "(%i bytes) by BIOS/FW, ", cache_size);
 		if (cache_size > SMP_CACHE_BYTES)
-			printk("expecting %i\n", SMP_CACHE_BYTES);
+			printk("expecting %li\n", SMP_CACHE_BYTES);
 		else {
-			printk("correcting to %i\n", SMP_CACHE_BYTES);
+			printk("correcting to %li\n", SMP_CACHE_BYTES);
 			pci_write_config_byte(pdev, PCI_CACHE_LINE_SIZE,
 					      SMP_CACHE_BYTES >> 2);
 		}
@@ -1068,7 +1068,7 @@ static int ace_init(struct net_device *dev)
 				tmp |= DMA_WRITE_MAX_128;
 				break;
 			default:
-				printk(KERN_INFO "  Cache line size %i not "
+				printk(KERN_INFO "  Cache line size %li not "
 				       "supported, PCI write and invalidate "
 				       "disabled\n", SMP_CACHE_BYTES);
 				ap->pci_command &= ~PCI_COMMAND_INVALIDATE;

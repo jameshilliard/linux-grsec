@@ -982,6 +982,10 @@ static int yam_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 			kfree(ym);
 			return -EFAULT;
 		}
+		if (ym->cmd != SIOCYAMSMCS) {
+			kfree(ym);
+			return -EINVAL;
+		}
 		if (ym->bitrate > YAM_MAXBITRATE) {
 			kfree(ym);
 			return -EINVAL;
@@ -997,6 +1001,8 @@ static int yam_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		if (copy_from_user(&yi, ifr->ifr_data, sizeof(struct yamdrv_ioctl_cfg)))
 			 return -EFAULT;
 
+		if (yi.cmd != SIOCYAMSCFG)
+			return -EINVAL;
 		if ((yi.cfg.mask & YAM_IOBASE) && netif_running(dev))
 			return -EINVAL;		/* Cannot change this parameter when up */
 		if ((yi.cfg.mask & YAM_IRQ) && netif_running(dev))

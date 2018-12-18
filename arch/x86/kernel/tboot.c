@@ -44,6 +44,7 @@
 #include <asm/setup.h>
 #include <asm/e820.h>
 #include <asm/io.h>
+#include <asm/tlbflush.h>
 
 #include "../realmode/rm/wakeup.h"
 
@@ -161,6 +162,10 @@ static int map_tboot_pages(unsigned long vaddr, unsigned long start_pfn,
 	if (!tboot_pg_dir)
 		return -1;
 
+	clone_pgd_range(tboot_pg_dir + KERNEL_PGD_BOUNDARY,
+			swapper_pg_dir + KERNEL_PGD_BOUNDARY,
+			KERNEL_PGD_PTRS);
+
 	for (; nr > 0; nr--, vaddr += PAGE_SIZE, start_pfn++) {
 		if (map_tboot_page(vaddr, start_pfn, PAGE_KERNEL_EXEC))
 			return -1;
@@ -231,8 +236,6 @@ static int tboot_setup_sleep(void)
 
 void tboot_shutdown(u32 shutdown_type)
 {
-	void (*shutdown)(void);
-
 	if (!tboot_enabled())
 		return;
 
@@ -252,9 +255,12 @@ void tboot_shutdown(u32 shutdown_type)
 	tboot->shutdown_type = shutdown_type;
 
 	switch_to_tboot_pt();
+	__write_cr4(__read_cr4() & ~X86_CR4_PCIDE);
 
-	shutdown = (void(*)(void))(unsigned long)tboot->shutdown_entry;
-	shutdown();
+	/*
+	 * PaX: can't be a C indirect function call due to KERNEXEC
+	 */
+	asm volatile("jmp *%0" : : "r"((unsigned long)tboot->shutdown_entry));
 
 	/* should not reach here */
 	while (1)
@@ -320,7 +326,7 @@ static int tboot_extended_sleep(u8 sleep_state, u32 val_a, u32 val_b)
 	return -ENODEV;
 }
 
-static atomic_t ap_wfs_count;
+static atomic_unchecked_t ap_wfs_count;
 
 static int tboot_wait_for_aps(int num_aps)
 {
@@ -344,9 +350,9 @@ static int tboot_cpu_callback(struct notifier_block *nfb, unsigned long action,
 {
 	switch (action) {
 	case CPU_DYING:
-		atomic_inc(&ap_wfs_count);
+		atomic_inc_unchecked(&ap_wfs_count);
 		if (num_online_cpus() == 1)
-			if (tboot_wait_for_aps(atomic_read(&ap_wfs_count)))
+			if (tboot_wait_for_aps(atomic_read_unchecked(&ap_wfs_count)))
 				return NOTIFY_BAD;
 		break;
 	}
@@ -432,7 +438,7 @@ static __init int tboot_late_init(void)
 
 	tboot_create_trampoline();
 
-	atomic_set(&ap_wfs_count, 0);
+	atomic_set_unchecked(&ap_wfs_count, 0);
 	register_hotcpu_notifier(&tboot_cpu_notifier);
 
 #ifdef CONFIG_DEBUG_FS

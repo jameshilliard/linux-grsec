@@ -57,8 +57,20 @@
 #include <linux/oom.h>
 #include <linux/compat.h>
 #include <linux/user_namespace.h>
+#include <linux/random.h>
+#include <linux/seq_file.h>
+#include <linux/coredump.h>
+#include <linux/mman.h>
+
+#ifdef CONFIG_PAX_REFCOUNT
+#include <linux/kallsyms.h>
+#include <linux/kdebug.h>
+#endif
+
+#include <trace/events/fs.h>
 
 #include <asm/uaccess.h>
+#include <asm/sections.h>
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 
@@ -67,10 +79,25 @@
 
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_PAX_HAVE_ACL_FLAGS
+void __weak pax_set_initial_flags(struct linux_binprm *bprm)
+{
+	pr_warn_once("PAX: PAX_HAVE_ACL_FLAGS was enabled without providing the pax_set_initial_flags callback, this is probably not what you wanted.\n");
+}
+#endif
+
+#ifdef CONFIG_PAX_HOOK_ACL_FLAGS
+void (*pax_set_initial_flags_func)(struct linux_binprm *bprm);
+EXPORT_SYMBOL(pax_set_initial_flags_func);
+#endif
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
 static DEFINE_RWLOCK(binfmt_lock);
+
+extern int gr_process_kernel_exec_ban(void);
+extern int gr_process_sugid_exec_ban(const struct linux_binprm *bprm);
 
 void __register_binfmt(struct linux_binfmt * fmt, int insert)
 {
@@ -78,8 +105,8 @@ void __register_binfmt(struct linux_binfmt * fmt, int insert)
 	if (WARN_ON(!fmt->load_binary))
 		return;
 	write_lock(&binfmt_lock);
-	insert ? list_add(&fmt->lh, &formats) :
-		 list_add_tail(&fmt->lh, &formats);
+	insert ? pax_list_add((struct list_head *)&fmt->lh, &formats) :
+		 pax_list_add_tail((struct list_head *)&fmt->lh, &formats);
 	write_unlock(&binfmt_lock);
 }
 
@@ -88,7 +115,7 @@ EXPORT_SYMBOL(__register_binfmt);
 void unregister_binfmt(struct linux_binfmt * fmt)
 {
 	write_lock(&binfmt_lock);
-	list_del(&fmt->lh);
+	pax_list_del((struct list_head *)&fmt->lh);
 	write_unlock(&binfmt_lock);
 }
 
@@ -190,18 +217,10 @@ static struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 		int write)
 {
 	struct page *page;
-	int ret;
 
-#ifdef CONFIG_STACK_GROWSUP
-	if (write) {
-		ret = expand_downwards(bprm->vma, pos);
-		if (ret < 0)
-			return NULL;
-	}
-#endif
-	ret = get_user_pages(current, bprm->mm, pos,
-			1, write, 1, &page, NULL);
-	if (ret <= 0)
+	if (0 > expand_downwards(bprm->vma, pos))
+		return NULL;
+	if (0 >= get_user_pages(current, bprm->mm, pos, 1, write, 1, &page, NULL))
 		return NULL;
 
 	if (write) {
@@ -233,6 +252,15 @@ static struct page *get_arg_page(struct linux_binprm *bprm, unsigned long pos,
 		 */
 		if (size <= ARG_MAX)
 			return page;
+
+#ifdef CONFIG_GRKERNSEC_PROC_MEMMAP
+		// only allow 512KB for argv+env on suid/sgid binaries
+		// to prevent easy ASLR exhaustion
+		if (bprm->is_privileged && (size > (512 * 1024))) {
+			put_page(page);
+			return NULL;
+		}
+#endif
 
 		/*
 		 * Limit to 1/4 of the max stack size or 3/4 of _STK_LIM
@@ -297,6 +325,11 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 	vma->vm_end = STACK_TOP_MAX;
 	vma->vm_start = vma->vm_end - PAGE_SIZE;
 	vma->vm_flags = VM_SOFTDIRTY | VM_STACK_FLAGS | VM_STACK_INCOMPLETE_SETUP;
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	vma->vm_flags &= ~(VM_EXEC | VM_MAYEXEC);
+#endif
+
 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
 	INIT_LIST_HEAD(&vma->anon_vma_chain);
 
@@ -308,6 +341,12 @@ static int __bprm_mm_init(struct linux_binprm *bprm)
 	arch_bprm_mm_init(mm, vma);
 	up_write(&mm->mmap_sem);
 	bprm->p = vma->vm_end - sizeof(void *);
+
+#ifdef CONFIG_PAX_RANDUSTACK
+	if (randomize_va_space)
+		bprm->p ^= prandom_u32() & ~PAGE_MASK;
+#endif
+
 	return 0;
 err:
 	up_write(&mm->mmap_sem);
@@ -424,7 +463,7 @@ struct user_arg_ptr {
 	} ptr;
 };
 
-static const char __user *get_user_arg_ptr(struct user_arg_ptr argv, int nr)
+const char __user *get_user_arg_ptr(struct user_arg_ptr argv, int nr)
 {
 	const char __user *native;
 
@@ -433,14 +472,14 @@ static const char __user *get_user_arg_ptr(struct user_arg_ptr argv, int nr)
 		compat_uptr_t compat;
 
 		if (get_user(compat, argv.ptr.compat + nr))
-			return ERR_PTR(-EFAULT);
+			return (const char __force_user *)ERR_PTR(-EFAULT);
 
 		return compat_ptr(compat);
 	}
 #endif
 
 	if (get_user(native, argv.ptr.native + nr))
-		return ERR_PTR(-EFAULT);
+		return (const char __force_user *)ERR_PTR(-EFAULT);
 
 	return native;
 }
@@ -459,7 +498,7 @@ static int count(struct user_arg_ptr argv, int max)
 			if (!p)
 				break;
 
-			if (IS_ERR(p))
+			if (IS_ERR((const char __force_kernel *)p))
 				return -EFAULT;
 
 			if (i >= max)
@@ -494,7 +533,7 @@ static int copy_strings(int argc, struct user_arg_ptr argv,
 
 		ret = -EFAULT;
 		str = get_user_arg_ptr(argv, argc);
-		if (IS_ERR(str))
+		if (IS_ERR((const char __force_kernel *)str))
 			goto out;
 
 		len = strnlen_user(str, MAX_ARG_STRLEN);
@@ -576,7 +615,7 @@ int copy_strings_kernel(int argc, const char *const *__argv,
 	int r;
 	mm_segment_t oldfs = get_fs();
 	struct user_arg_ptr argv = {
-		.ptr.native = (const char __user *const  __user *)__argv,
+		.ptr.native = (const char __user * const __force_user *)__argv,
 	};
 
 	set_fs(KERNEL_DS);
@@ -611,7 +650,8 @@ static int shift_arg_pages(struct vm_area_struct *vma, unsigned long shift)
 	unsigned long new_end = old_end - shift;
 	struct mmu_gather tlb;
 
-	BUG_ON(new_start > new_end);
+	if (new_start >= new_end || new_start < mmap_min_addr)
+		return -ENOMEM;
 
 	/*
 	 * ensure there are no vmas between where we want to go
@@ -619,6 +659,10 @@ static int shift_arg_pages(struct vm_area_struct *vma, unsigned long shift)
 	 */
 	if (vma != find_vma(mm, new_start))
 		return -EFAULT;
+
+#ifdef CONFIG_PAX_SEGMEXEC
+	BUG_ON(pax_find_mirror_vma(vma));
+#endif
 
 	/*
 	 * cover the whole range: [new_start, old_end)
@@ -697,20 +741,16 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	stack_base = PAGE_ALIGN(stack_top - stack_base);
 
 	stack_shift = vma->vm_start - stack_base;
-	mm->arg_start = bprm->p - stack_shift;
+	mm->arg_end = mm->arg_start = bprm->p - stack_shift;
 	bprm->p = vma->vm_end - stack_shift;
 #else
 	stack_top = arch_align_stack(stack_top);
 	stack_top = PAGE_ALIGN(stack_top);
 
-	if (unlikely(stack_top < mmap_min_addr) ||
-	    unlikely(vma->vm_end - vma->vm_start >= stack_top - mmap_min_addr))
-		return -ENOMEM;
-
 	stack_shift = vma->vm_end - stack_top;
 
 	bprm->p -= stack_shift;
-	mm->arg_start = bprm->p;
+	mm->arg_end = mm->arg_start = bprm->p;
 #endif
 
 	if (bprm->loader)
@@ -718,7 +758,27 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	bprm->exec -= stack_shift;
 
 	down_write(&mm->mmap_sem);
+
+	/* Move stack pages down in memory. */
+	if (stack_shift) {
+		ret = shift_arg_pages(vma, stack_shift);
+		if (ret)
+			goto out_unlock;
+	}
+
 	vm_flags = VM_STACK_FLAGS;
+
+#if defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC)
+	if (mm->pax_flags & (MF_PAX_PAGEEXEC | MF_PAX_SEGMEXEC)) {
+		vm_flags &= ~VM_EXEC;
+
+#ifdef CONFIG_PAX_MPROTECT
+		if (mm->pax_flags & MF_PAX_MPROTECT)
+			vm_flags &= ~VM_MAYEXEC;
+#endif
+
+	}
+#endif
 
 	/*
 	 * Adjust stack execute permissions; explicitly enable for
@@ -737,13 +797,6 @@ int setup_arg_pages(struct linux_binprm *bprm,
 	if (ret)
 		goto out_unlock;
 	BUG_ON(prev != vma);
-
-	/* Move stack pages down in memory. */
-	if (stack_shift) {
-		ret = shift_arg_pages(vma, stack_shift);
-		if (ret)
-			goto out_unlock;
-	}
 
 	/* mprotect_fixup is overkill to remove the temporary stack flags */
 	vma->vm_flags &= ~VM_STACK_INCOMPLETE_SETUP;
@@ -768,6 +821,27 @@ int setup_arg_pages(struct linux_binprm *bprm,
 #endif
 	current->mm->start_stack = bprm->p;
 	ret = expand_stack(vma, stack_base);
+
+#if !defined(CONFIG_STACK_GROWSUP) && defined(CONFIG_PAX_RANDMMAP)
+	if (!ret && (mm->pax_flags & MF_PAX_RANDMMAP) && STACK_TOP <= 0xFFFFFFFFU && STACK_TOP > vma->vm_end) {
+		unsigned long size;
+		vm_flags_t vm_flags;
+
+		size = STACK_TOP - vma->vm_end;
+		vm_flags = VM_NONE | VM_DONTEXPAND | VM_DONTDUMP;
+
+		ret = vma->vm_end != mmap_region(NULL, vma->vm_end, size, vm_flags, 0);
+
+#ifdef CONFIG_X86
+		if (!ret) {
+			size = PAGE_SIZE + mmap_min_addr + ((mm->delta_mmap ^ mm->delta_stack) & (0xFFUL << PAGE_SHIFT));
+			ret = 0 != mmap_region(NULL, 0, PAGE_ALIGN(size), vm_flags, 0);
+		}
+#endif
+
+	}
+#endif
+
 	if (ret)
 		ret = -EFAULT;
 
@@ -783,6 +857,7 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 {
 	struct file *file;
 	int err;
+	int unsafe_flags = 0;
 	struct open_flags open_exec_flags = {
 		.open_flag = O_LARGEFILE | O_RDONLY | __FMODE_EXEC,
 		.acc_mode = MAY_EXEC | MAY_OPEN,
@@ -808,12 +883,22 @@ static struct file *do_open_execat(int fd, struct filename *name, int flags)
 	if (path_noexec(&file->f_path))
 		goto exit;
 
+	if (current->ptrace && !ptracer_capable(current, current_user_ns()))
+		unsafe_flags = LSM_UNSAFE_PTRACE;
+
+	if (gr_ptrace_readexec(file, unsafe_flags)) {
+		err = -EPERM;
+		goto exit;
+	}
+
 	err = deny_write_access(file);
 	if (err)
 		goto exit;
 
-	if (name->name[0] != '\0')
+	if (name->name[0] != '\0') {
 		fsnotify_open(file);
+		trace_open_exec(name->name);
+	}
 
 out:
 	return file;
@@ -843,10 +928,13 @@ int kernel_read(struct file *file, loff_t offset,
 	loff_t pos = offset;
 	int result;
 
+	if (count > INT_MAX)
+		return -EINVAL;
+
 	old_fs = get_fs();
 	set_fs(get_ds());
 	/* The cast to a user pointer is valid due to the set_fs() */
-	result = vfs_read(file, (void __user *)addr, count, &pos);
+	result = vfs_read(file, (void __force_user *)addr, count, &pos);
 	set_fs(old_fs);
 	return result;
 }
@@ -1173,6 +1261,22 @@ EXPORT_SYMBOL(would_dump);
 
 void setup_new_exec(struct linux_binprm * bprm)
 {
+	gr_set_proc_res(current);
+
+#ifdef CONFIG_GRKERNSEC_PROC_MEMMAP
+	/* limit suid stack to 8MB
+	 */
+	if (bprm->is_privileged) {
+		task_lock(current->group_leader);
+		if (rlimit_max(RLIMIT_STACK) > (8 * 1024 * 1024))
+			current->signal->rlim[RLIMIT_STACK].rlim_max = 8 * 1024 * 1024;
+		if (rlimit(RLIMIT_STACK) > (8 * 1024 * 1024))
+			current->signal->rlim[RLIMIT_STACK].rlim_cur = 8 * 1024 * 1024;
+		task_unlock(current->group_leader);
+	}
+#endif
+
+
 	arch_pick_mmap_layout(current->mm);
 
 	/* This is the point of no return */
@@ -1318,7 +1422,7 @@ static void check_unsafe_exec(struct linux_binprm *bprm)
 	}
 	rcu_read_unlock();
 
-	if (p->fs->users > n_fs)
+	if (atomic_read(&p->fs->users) > n_fs)
 		bprm->unsafe |= LSM_UNSAFE_SHARE;
 	else
 		p->fs->in_exec = 1;
@@ -1362,11 +1466,13 @@ static void bprm_fill_uid(struct linux_binprm *bprm)
 		return;
 
 	if (mode & S_ISUID) {
+		bprm->is_privileged = true;
 		bprm->per_clear |= PER_CLEAR_ON_SETID;
 		bprm->cred->euid = uid;
 	}
 
 	if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+		bprm->is_privileged = true;
 		bprm->per_clear |= PER_CLEAR_ON_SETID;
 		bprm->cred->egid = gid;
 	}
@@ -1519,6 +1625,31 @@ static int exec_binprm(struct linux_binprm *bprm)
 	return ret;
 }
 
+#ifdef CONFIG_GRKERNSEC_PROC_MEMMAP
+static DEFINE_PER_CPU(u64, exec_counter);
+static int __init init_exec_counters(void)
+{
+	unsigned int cpu;
+
+	for_each_possible_cpu(cpu) {
+		per_cpu(exec_counter, cpu) = (u64)cpu;
+	}
+
+	return 0;
+}
+early_initcall(init_exec_counters);
+static inline void increment_exec_counter(void)
+{
+	BUILD_BUG_ON(NR_CPUS > (1 << 16));
+	current->exec_id = this_cpu_add_return(exec_counter, 1 << 16);
+}
+#else
+static inline void increment_exec_counter(void) {}
+#endif
+
+extern void gr_handle_exec_args(struct linux_binprm *bprm,
+				struct user_arg_ptr argv);
+
 /*
  * sys_execve() executes a new program.
  */
@@ -1527,6 +1658,9 @@ static int do_execveat_common(int fd, struct filename *filename,
 			      struct user_arg_ptr envp,
 			      int flags)
 {
+#ifdef CONFIG_GRKERNSEC
+	struct gr_rbac_exec_state gr_exec_state;
+#endif
 	char *pathbuf = NULL;
 	struct linux_binprm *bprm;
 	struct file *file;
@@ -1535,6 +1669,8 @@ static int do_execveat_common(int fd, struct filename *filename,
 
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
+
+	gr_learn_resource(current, RLIMIT_NPROC, atomic_read(&current_user()->processes), 1);
 
 	/*
 	 * We move the actual failure in case of RLIMIT_NPROC excess from
@@ -1599,6 +1735,11 @@ static int do_execveat_common(int fd, struct filename *filename,
 	}
 	bprm->interp = bprm->filename;
 
+	if (!gr_acl_handle_execve(file->f_path.dentry, file->f_path.mnt)) {
+		retval = -EACCES;
+		goto out_unmark;
+	}
+
 	retval = bprm_mm_init(bprm);
 	if (retval)
 		goto out_unmark;
@@ -1615,26 +1756,62 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (retval < 0)
 		goto out;
 
+#ifdef CONFIG_GRKERNSEC
+	gr_save_rbac_exec_state(&gr_exec_state);
+
+	get_file(file);
+	current->exec_file = file;
+#endif
+	if (gr_process_kernel_exec_ban() || gr_process_sugid_exec_ban(bprm)) {
+		retval = -EPERM;
+		goto out_fail;
+	}
+
+	if (!gr_tpe_allow(file)) {
+		retval = -EACCES;
+		goto out_fail;
+	}
+
+	if (gr_check_crash_exec(file)) {
+		retval = -EACCES;
+		goto out_fail;
+	}
+
+	retval = gr_set_proc_label(file->f_path.dentry, file->f_path.mnt,
+					bprm->unsafe);
+	if (retval < 0)
+		goto out_fail;
+
 	retval = copy_strings_kernel(1, &bprm->filename, bprm);
 	if (retval < 0)
-		goto out;
+		goto out_fail;
 
 	bprm->exec = bprm->p;
 	retval = copy_strings(bprm->envc, envp, bprm);
 	if (retval < 0)
-		goto out;
+		goto out_fail;
 
 	retval = copy_strings(bprm->argc, argv, bprm);
 	if (retval < 0)
-		goto out;
+		goto out_fail;
+
+	gr_log_chroot_exec(file->f_path.dentry, file->f_path.mnt);
+
+	gr_handle_exec_args(bprm, argv);
 
 	would_dump(bprm, bprm->file);
 
 	retval = exec_binprm(bprm);
 	if (retval < 0)
-		goto out;
+		goto out_fail;
+#ifdef CONFIG_GRKERNSEC
+	if (gr_exec_state.exec_file)
+		fput(gr_exec_state.exec_file);
+#endif
 
 	/* execve succeeded */
+
+	increment_exec_counter();
 	current->fs->in_exec = 0;
 	current->in_execve = 0;
 	acct_update_integrals(current);
@@ -1645,6 +1822,13 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (displaced)
 		put_files_struct(displaced);
 	return retval;
+
+out_fail:
+#ifdef CONFIG_GRKERNSEC
+	gr_restore_rbac_exec_state(&gr_exec_state);
+	/* the one we called get_file on above */
+	fput(file);
+#endif
 
 out:
 	if (bprm->mm) {
@@ -1791,4 +1975,336 @@ COMPAT_SYSCALL_DEFINE5(execveat, int, fd,
 				  getname_flags(filename, lookup_flags, NULL),
 				  argv, envp, flags);
 }
+#endif
+
+int pax_check_flags(unsigned long *flags)
+{
+	int retval = 0;
+
+#if !defined(CONFIG_X86_32) || !defined(CONFIG_PAX_SEGMEXEC)
+	if (*flags & MF_PAX_SEGMEXEC)
+	{
+		*flags &= ~MF_PAX_SEGMEXEC;
+		retval = -EINVAL;
+	}
+#endif
+
+	if ((*flags & MF_PAX_PAGEEXEC)
+
+#ifdef CONFIG_PAX_PAGEEXEC
+	    &&  (*flags & MF_PAX_SEGMEXEC)
+#endif
+
+	   )
+	{
+		*flags &= ~MF_PAX_PAGEEXEC;
+		retval = -EINVAL;
+	}
+
+	if ((*flags & MF_PAX_MPROTECT)
+
+#ifdef CONFIG_PAX_MPROTECT
+	    && !(*flags & (MF_PAX_PAGEEXEC | MF_PAX_SEGMEXEC))
+#endif
+
+	   )
+	{
+		*flags &= ~MF_PAX_MPROTECT;
+		retval = -EINVAL;
+	}
+
+	if ((*flags & MF_PAX_EMUTRAMP)
+
+#ifdef CONFIG_PAX_EMUTRAMP
+	    && !(*flags & (MF_PAX_PAGEEXEC | MF_PAX_SEGMEXEC))
+#endif
+
+	   )
+	{
+		*flags &= ~MF_PAX_EMUTRAMP;
+		retval = -EINVAL;
+	}
+
+	return retval;
+}
+
+EXPORT_SYMBOL(pax_check_flags);
+
+#if defined(CONFIG_PAX_PAGEEXEC) || defined(CONFIG_PAX_SEGMEXEC)
+char *pax_get_path(const struct path *path, char *buf, int buflen)
+{
+	char *pathname = d_path(path, buf, buflen);
+
+	if (IS_ERR(pathname))
+		goto toolong;
+
+	pathname = mangle_path(buf, pathname, "\t\n\\");
+	if (!pathname)
+		goto toolong;
+
+	*pathname = 0;
+	return buf;
+
+toolong:
+	return "<path too long>";
+}
+EXPORT_SYMBOL(pax_get_path);
+
+void pax_report_fault(struct pt_regs *regs, void *pc, void *sp)
+{
+	struct task_struct *tsk = current;
+	struct mm_struct *mm = current->mm;
+	char *buffer_exec = (char *)__get_free_page(GFP_KERNEL);
+	char *buffer_fault = (char *)__get_free_page(GFP_KERNEL);
+	char *path_exec = NULL;
+	char *path_fault = NULL;
+	unsigned long start = 0UL, end = 0UL, offset = 0UL;
+	siginfo_t info = { };
+
+	if (buffer_exec && buffer_fault) {
+		struct vm_area_struct *vma, *vma_exec = NULL, *vma_fault = NULL;
+
+		down_read(&mm->mmap_sem);
+		vma = mm->mmap;
+		while (vma && (!vma_exec || !vma_fault)) {
+			if (vma->vm_file && mm->exe_file == vma->vm_file && (vma->vm_flags & VM_EXEC))
+				vma_exec = vma;
+			if (vma->vm_start <= (unsigned long)pc && (unsigned long)pc < vma->vm_end)
+				vma_fault = vma;
+			vma = vma->vm_next;
+		}
+		if (vma_exec)
+			path_exec = pax_get_path(&vma_exec->vm_file->f_path, buffer_exec, PAGE_SIZE);
+		if (vma_fault) {
+			start = vma_fault->vm_start;
+			end = vma_fault->vm_end;
+			offset = vma_fault->vm_pgoff << PAGE_SHIFT;
+			if (vma_fault->vm_file)
+				path_fault = pax_get_path(&vma_fault->vm_file->f_path, buffer_fault, PAGE_SIZE);
+			else if ((unsigned long)pc >= mm->start_brk && (unsigned long)pc < mm->brk)
+				path_fault = "<heap>";
+			else if (vma_fault->vm_flags & (VM_GROWSDOWN | VM_GROWSUP))
+				path_fault = "<stack>";
+			else
+				path_fault = "<anonymous mapping>";
+		}
+		up_read(&mm->mmap_sem);
+	}
+	if (tsk->signal->curr_ip)
+		printk(KERN_ERR "PAX: From %pI4: execution attempt in: %s, %08lx-%08lx %08lx\n", &tsk->signal->curr_ip, path_fault, start, end, offset);
+	else
+		printk(KERN_ERR "PAX: execution attempt in: %s, %08lx-%08lx %08lx\n", path_fault, start, end, offset);
+	printk(KERN_ERR "PAX: terminating task: %s(%s):%d, uid/euid: %u/%u, PC: %p, SP: %p\n", path_exec, tsk->comm, task_pid_nr(tsk),
+			from_kuid_munged(&init_user_ns, task_uid(tsk)), from_kuid_munged(&init_user_ns, task_euid(tsk)), pc, sp);
+	free_page((unsigned long)buffer_exec);
+	free_page((unsigned long)buffer_fault);
+	pax_report_insns(regs, pc, sp);
+	info.si_signo = SIGKILL;
+	info.si_errno = 0;
+	info.si_code = SI_KERNEL;
+	info.si_pid = 0;
+	info.si_uid = 0;
+	do_coredump(&info);
+}
+#endif
+
+#ifdef CONFIG_PAX_REFCOUNT
+static DEFINE_RATELIMIT_STATE(refcount_ratelimit, 15 * HZ, 3);
+
+void pax_report_refcount_error(struct pt_regs *regs, const char *kind)
+{
+	do_send_sig_info(SIGKILL, SEND_SIG_FORCED, current, true);
+
+	if (!__ratelimit(&refcount_ratelimit))
+		return;
+
+	if (current->signal->curr_ip)
+		pr_emerg("PAX: From %pI4: %s detected in: %s:%d, uid/euid: %u/%u\n",
+			 &current->signal->curr_ip, kind ? kind : "refcount error",
+			 current->comm, task_pid_nr(current),
+			 from_kuid_munged(&init_user_ns, current_uid()),
+			 from_kuid_munged(&init_user_ns, current_euid()));
+	else
+		pr_emerg("PAX: %s detected in: %s:%d, uid/euid: %u/%u\n",
+			 kind ? kind : "refcount error",
+			 current->comm, task_pid_nr(current),
+			 from_kuid_munged(&init_user_ns, current_uid()),
+			 from_kuid_munged(&init_user_ns, current_euid()));
+	print_symbol(KERN_EMERG "PAX: refcount error occured at: %s\n", instruction_pointer(regs));
+	preempt_disable();
+	show_regs(regs);
+	preempt_enable();
+}
+#endif
+
+#ifdef CONFIG_PAX_USERCOPY
+/* 0: not at all, 1: fully, 2: fully inside frame, -1: partially (implies an error) */
+static noinline int check_stack_object(unsigned long obj, unsigned long len)
+{
+	unsigned long stack = (unsigned long)task_stack_page(current);
+	unsigned long stackend = (unsigned long)stack + THREAD_SIZE;
+
+#if defined(CONFIG_FRAME_POINTER) && defined(CONFIG_X86)
+	unsigned long frame = 0;
+	unsigned long oldframe;
+#endif
+
+	if (obj + len < obj)
+		return -1;
+
+	if (obj + len <= (unsigned long)stack || (unsigned long)stackend <= obj)
+		return 0;
+
+	if (obj < (unsigned long)stack || (unsigned long)stackend < obj + len)
+		return -1;
+
+#if defined(CONFIG_FRAME_POINTER) && defined(CONFIG_X86)
+	oldframe = (unsigned long)__builtin_frame_address(1);
+	if (oldframe)
+		frame = (unsigned long)__builtin_frame_address(2);
+	/*
+	  low ----------------------------------------------> high
+	  [saved bp][saved ip][args][local vars][saved bp][saved ip]
+			      ^----------------^
+			  allow copies only within here
+	*/
+	while (stack <= frame && frame < stackend) {
+		/* if obj + len extends past the last frame, this
+		   check won't pass and the next frame will be 0,
+		   causing us to bail out and correctly report
+		   the copy as invalid
+		*/
+		if (obj + len <= frame)
+			return obj >= oldframe + 2 * sizeof(unsigned long) ? 2 : -1;
+		oldframe = frame;
+		frame = *(unsigned long *)frame;
+	}
+	return -1;
+#else
+	return 1;
+#endif
+}
+
+static DEFINE_RATELIMIT_STATE(usercopy_ratelimit, 15 * HZ, 3);
+
+static __noreturn void pax_report_usercopy(const void *ptr, unsigned long len, bool to_user, const char *type)
+{
+	if (__ratelimit(&usercopy_ratelimit)) {
+		if (current->signal->curr_ip)
+			pr_emerg("PAX: From %pI4: kernel memory %s attempt detected %s %p (%s) (%lu bytes)\n",
+				 &current->signal->curr_ip, to_user ? "leak" : "overwrite", to_user ? "from" : "to", ptr, type ? : "unknown", len);
+		else
+			pr_emerg("PAX: kernel memory %s attempt detected %s %p (%s) (%lu bytes)\n",
+				 to_user ? "leak" : "overwrite", to_user ? "from" : "to", ptr, type ? : "unknown", len);
+		dump_stack();
+	}
+	gr_handle_kernel_exploit();
+	do_group_exit(SIGKILL);
+}
+#endif
+
+#ifdef CONFIG_PAX_USERCOPY
+
+static inline bool check_kernel_text_object(unsigned long low, unsigned long high)
+{
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_KERNEXEC)
+	unsigned long textlow = ktla_ktva((unsigned long)_stext);
+#ifdef CONFIG_MODULES
+	unsigned long texthigh = (unsigned long)MODULES_EXEC_VADDR;
+#else
+	unsigned long texthigh = ktla_ktva((unsigned long)_etext);
+#endif
+
+#else
+	unsigned long textlow = (unsigned long)_stext;
+	unsigned long texthigh = (unsigned long)_etext;
+
+#ifdef CONFIG_X86_64
+	/* check against linear mapping as well */
+	if (high > (unsigned long)__va(__pa(textlow)) &&
+	    low < (unsigned long)__va(__pa(texthigh)))
+		return true;
+#endif
+
+#endif
+
+	if (high <= textlow || low >= texthigh)
+		return false;
+	else
+		return true;
+}
+#endif
+
+void __check_object_size(const void *ptr, unsigned long n, bool to_user, bool const_size)
+{
+#ifdef CONFIG_PAX_USERCOPY
+	const char *type;
+#endif
+
+#if !defined(CONFIG_STACK_GROWSUP) && !defined(CONFIG_X86_64)
+	unsigned long stackstart = (unsigned long)task_stack_page(current);
+	unsigned long currentsp = (unsigned long)&stackstart;
+	if (unlikely((currentsp < stackstart + 512 ||
+		     currentsp >= stackstart + THREAD_SIZE) && !in_interrupt()))
+		BUG();
+#endif
+
+#ifndef CONFIG_PAX_USERCOPY_DEBUG
+	if (const_size)
+		return;
+#endif
+
+#ifdef CONFIG_PAX_USERCOPY
+	if (!n)
+		return;
+
+	type = check_heap_object(ptr, n);
+	if (!type) {
+		int ret = check_stack_object((unsigned long)ptr, n);
+		if (ret == 1 || ret == 2)
+			return;
+		if (ret == 0) {
+			if (check_kernel_text_object((unsigned long)ptr, (unsigned long)ptr + n))
+				type = "<kernel text>";
+			else
+				return;
+		} else
+			type = "<process stack>";
+	}
+
+	pax_report_usercopy(ptr, n, to_user, type);
+#endif
+
+}
+EXPORT_SYMBOL(__check_object_size);
+
+#ifdef CONFIG_PAX_MEMORY_STACKLEAK
+void __used pax_track_stack(void)
+{
+	unsigned long sp = (unsigned long)&sp;
+	if (sp < current_thread_info()->lowest_stack &&
+	    sp >= (unsigned long)task_stack_page(current) + 2 * sizeof(unsigned long))
+		current_thread_info()->lowest_stack = sp;
+#ifndef CONFIG_GRKERNSEC_KSTACKOVERFLOW
+	if (unlikely((sp & (THREAD_SIZE - 1)) < (THREAD_SIZE/16)))
+		BUG();
+#endif
+}
+EXPORT_SYMBOL(pax_track_stack);
+#endif
+
+#ifdef CONFIG_PAX_SIZE_OVERFLOW
+static DEFINE_RATELIMIT_STATE(size_overflow_ratelimit, 15 * HZ, 3);
+
+void __nocapture(1, 3, 4) __used report_size_overflow(const char *file, unsigned int line, const char *func, const char *ssa_name)
+{
+	if (!pax_size_overflow_report_only || __ratelimit(&size_overflow_ratelimit)) {
+		pr_emerg("PAX: size overflow detected in function %s %s:%u %s", func, file, line, ssa_name);
+		dump_stack();
+	}
+
+	if (!pax_size_overflow_report_only)
+		do_group_exit(SIGKILL);
+}
+EXPORT_SYMBOL(report_size_overflow);
 #endif

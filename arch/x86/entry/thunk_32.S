@@ -6,6 +6,7 @@
  */
 	#include <linux/linkage.h>
 	#include <asm/asm.h>
+	#include <asm/nospec-branch.h>
 
 	/* put return address in eax (arg1) */
 	.macro THUNK name, func, put_ret_addr_in_eax=0

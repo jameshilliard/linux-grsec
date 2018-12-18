@@ -1824,7 +1824,7 @@ struct security_hook_heads {
 	struct list_head audit_rule_match;
 	struct list_head audit_rule_free;
 #endif /* CONFIG_AUDIT */
-};
+} __randomize_layout;
 
 /*
  * Security module hook list structure.
@@ -1834,7 +1834,7 @@ struct security_hook_list {
 	struct list_head		list;
 	struct list_head		*head;
 	union security_list_options	hook;
-};
+} __randomize_layout;
 
 /*
  * Initializing a security_hook_list structure takes
@@ -1853,7 +1853,7 @@ static inline void security_add_hooks(struct security_hook_list *hooks,
 	int i;
 
 	for (i = 0; i < count; i++)
-		list_add_tail_rcu(&hooks[i].list, hooks[i].head);
+		pax_list_add_tail_rcu((struct list_head *)&hooks[i].list, hooks[i].head);
 }
 
 #ifdef CONFIG_SECURITY_SELINUX_DISABLE
@@ -1875,7 +1875,7 @@ static inline void security_delete_hooks(struct security_hook_list *hooks,
 	int i;
 
 	for (i = 0; i < count; i++)
-		list_del_rcu(&hooks[i].list);
+		pax_list_del_rcu((struct list_head *)&hooks[i].list);
 }
 #endif /* CONFIG_SECURITY_SELINUX_DISABLE */
 

@@ -2,7 +2,7 @@
 
 #include <linux/linkage.h>
 #include <asm/cpufeatures.h>
-#include <asm/alternative-asm.h>
+#include <asm/nospec-branch.h>
 
 .weak memset
 
@@ -40,6 +40,7 @@ ENTRY(__memset)
 	movl %edx,%ecx
 	rep stosb
 	movq %r9,%rax
+	pax_force_retaddr
 	ret
 ENDPROC(memset)
 ENDPROC(__memset)
@@ -61,6 +62,7 @@ ENTRY(memset_erms)
 	movq %rdx,%rcx
 	rep stosb
 	movq %r9,%rax
+	pax_force_retaddr
 	ret
 ENDPROC(memset_erms)
 
@@ -123,6 +125,7 @@ ENTRY(memset_orig)
 
 .Lende:
 	movq	%r10,%rax
+	pax_force_retaddr
 	ret
 
 .Lbad_alignment:

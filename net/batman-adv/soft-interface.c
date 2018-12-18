@@ -178,7 +178,7 @@ static void batadv_interface_set_rx_mode(struct net_device *dev)
 {
 }
 
-static int batadv_interface_tx(struct sk_buff *skb,
+static netdev_tx_t batadv_interface_tx(struct sk_buff *skb,
 			       struct net_device *soft_iface)
 {
 	struct ethhdr *ethhdr;
@@ -330,7 +330,7 @@ send:
 				primary_if->net_dev->dev_addr);
 
 		/* set broadcast sequence number */
-		seqno = atomic_inc_return(&bat_priv->bcast_seqno);
+		seqno = atomic_inc_return_unchecked(&bat_priv->bcast_seqno);
 		bcast_packet->seqno = htonl(seqno);
 
 		batadv_add_bcast_packet_to_list(bat_priv, skb, brd_delay);
@@ -796,8 +796,8 @@ static int batadv_softif_init_late(struct net_device *dev)
 	atomic_set(&bat_priv->batman_queue_left, BATADV_BATMAN_QUEUE_LEN);
 
 	atomic_set(&bat_priv->mesh_state, BATADV_MESH_INACTIVE);
-	atomic_set(&bat_priv->bcast_seqno, 1);
-	atomic_set(&bat_priv->tt.vn, 0);
+	atomic_set_unchecked(&bat_priv->bcast_seqno, 1);
+	atomic_set_unchecked(&bat_priv->tt.vn, 0);
 	atomic_set(&bat_priv->tt.local_changes, 0);
 	atomic_set(&bat_priv->tt.ogm_append_cnt, 0);
 #ifdef CONFIG_BATMAN_ADV_BLA
@@ -810,7 +810,7 @@ static int batadv_softif_init_late(struct net_device *dev)
 
 	/* randomize initial seqno to avoid collision */
 	get_random_bytes(&random_seqno, sizeof(random_seqno));
-	atomic_set(&bat_priv->frag_seqno, random_seqno);
+	atomic_set_unchecked(&bat_priv->frag_seqno, random_seqno);
 
 	bat_priv->primary_if = NULL;
 	bat_priv->num_ifaces = 0;
@@ -1016,7 +1016,7 @@ int batadv_softif_is_valid(const struct net_device *net_dev)
 	return 0;
 }
 
-struct rtnl_link_ops batadv_link_ops __read_mostly = {
+struct rtnl_link_ops batadv_link_ops = {
 	.kind		= "batadv",
 	.priv_size	= sizeof(struct batadv_priv),
 	.setup		= batadv_softif_init_early,

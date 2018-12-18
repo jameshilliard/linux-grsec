@@ -148,6 +148,10 @@
 #include <linux/netlink.h>
 #include <net/dst_metadata.h>
 
+#ifdef CONFIG_GRKERNSEC_BLACKHOLE
+extern int grsec_enable_blackhole;
+#endif
+
 /*
  *	Process Router Attention IP option (RFC 2113)
  */
@@ -223,6 +227,9 @@ static int ip_local_deliver_finish(struct net *net, struct sock *sk, struct sk_b
 			if (!raw) {
 				if (xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
 					IP_INC_STATS_BH(net, IPSTATS_MIB_INUNKNOWNPROTOS);
+#ifdef CONFIG_GRKERNSEC_BLACKHOLE
+					if (!grsec_enable_blackhole || (skb->dev->flags & IFF_LOOPBACK))
+#endif
 					icmp_send(skb, ICMP_DEST_UNREACH,
 						  ICMP_PROT_UNREACH, 0);
 				}
@@ -448,6 +455,7 @@ int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, 
 
 	/* Remove any debris in the socket control block */
 	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
+	IPCB(skb)->iif = skb->skb_iif;
 
 	/* Must drop socket now because of tproxy. */
 	skb_orphan(skb);

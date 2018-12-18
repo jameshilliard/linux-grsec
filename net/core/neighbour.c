@@ -869,7 +869,7 @@ static void neigh_probe(struct neighbour *neigh)
 	write_unlock(&neigh->lock);
 	if (neigh->ops->solicit)
 		neigh->ops->solicit(neigh, skb);
-	atomic_inc(&neigh->probes);
+	atomic_inc_unchecked(&neigh->probes);
 	kfree_skb(skb);
 }
 
@@ -925,7 +925,7 @@ static void neigh_timer_handler(unsigned long arg)
 			neigh_dbg(2, "neigh %p is probed\n", neigh);
 			neigh->nud_state = NUD_PROBE;
 			neigh->updated = jiffies;
-			atomic_set(&neigh->probes, 0);
+			atomic_set_unchecked(&neigh->probes, 0);
 			notify = 1;
 			next = now + NEIGH_VAR(neigh->parms, RETRANS_TIME);
 		}
@@ -935,7 +935,7 @@ static void neigh_timer_handler(unsigned long arg)
 	}
 
 	if ((neigh->nud_state & (NUD_INCOMPLETE | NUD_PROBE)) &&
-	    atomic_read(&neigh->probes) >= neigh_max_probes(neigh)) {
+	    atomic_read_unchecked(&neigh->probes) >= neigh_max_probes(neigh)) {
 		neigh->nud_state = NUD_FAILED;
 		notify = 1;
 		neigh_invalidate(neigh);
@@ -979,7 +979,7 @@ int __neigh_event_send(struct neighbour *neigh, struct sk_buff *skb)
 		    NEIGH_VAR(neigh->parms, APP_PROBES)) {
 			unsigned long next, now = jiffies;
 
-			atomic_set(&neigh->probes,
+			atomic_set_unchecked(&neigh->probes,
 				   NEIGH_VAR(neigh->parms, UCAST_PROBES));
 			neigh->nud_state     = NUD_INCOMPLETE;
 			neigh->updated = now;
@@ -1179,7 +1179,7 @@ int neigh_update(struct neighbour *neigh, const u8 *lladdr, u8 new,
 	if (new != old) {
 		neigh_del_timer(neigh);
 		if (new & NUD_PROBE)
-			atomic_set(&neigh->probes, 0);
+			atomic_set_unchecked(&neigh->probes, 0);
 		if (new & NUD_IN_TIMER)
 			neigh_add_timer(neigh, (jiffies +
 						((new & NUD_REACHABLE) ?
@@ -1267,7 +1267,7 @@ void __neigh_set_probe_once(struct neighbour *neigh)
 	if (!(neigh->nud_state & NUD_FAILED))
 		return;
 	neigh->nud_state = NUD_INCOMPLETE;
-	atomic_set(&neigh->probes, neigh_max_probes(neigh));
+	atomic_set_unchecked(&neigh->probes, neigh_max_probes(neigh));
 	neigh_add_timer(neigh,
 			jiffies + NEIGH_VAR(neigh->parms, RETRANS_TIME));
 }
@@ -2204,7 +2204,7 @@ static int neigh_fill_info(struct sk_buff *skb, struct neighbour *neigh,
 	ci.ndm_refcnt	 = atomic_read(&neigh->refcnt) - 1;
 	read_unlock_bh(&neigh->lock);
 
-	if (nla_put_u32(skb, NDA_PROBES, atomic_read(&neigh->probes)) ||
+	if (nla_put_u32(skb, NDA_PROBES, atomic_read_unchecked(&neigh->probes)) ||
 	    nla_put(skb, NDA_CACHEINFO, sizeof(ci), &ci))
 		goto nla_put_failure;
 
@@ -2896,7 +2896,7 @@ static int proc_unres_qlen(struct ctl_table *ctl, int write,
 			   void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int size, ret;
-	struct ctl_table tmp = *ctl;
+	ctl_table_no_const tmp = *ctl;
 
 	tmp.extra1 = &zero;
 	tmp.extra2 = &unres_qlen_max;
@@ -2958,7 +2958,7 @@ static int neigh_proc_dointvec_zero_intmax(struct ctl_table *ctl, int write,
 					   void __user *buffer,
 					   size_t *lenp, loff_t *ppos)
 {
-	struct ctl_table tmp = *ctl;
+	ctl_table_no_const tmp = *ctl;
 	int ret;
 
 	tmp.extra1 = &zero;

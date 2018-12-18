@@ -4,6 +4,7 @@
 #include <linux/swap.h>
 #include <linux/memblock.h>
 #include <linux/bootmem.h>	/* for max_low_pfn */
+#include <linux/tboot.h>
 #include <linux/swapfile.h>
 #include <linux/swapops.h>
 
@@ -19,6 +20,10 @@
 #include <asm/proto.h>
 #include <asm/dma.h>		/* for MAX_DMA_PFN */
 #include <asm/microcode.h>
+#include <asm/bios_ebda.h>
+#include <asm/desc.h>
+#include <asm/vdso.h>
+#include <../../xen/vdso.h>
 
 /*
  * We need to define the tracepoints somewhere, and tlb.c
@@ -150,6 +155,27 @@ struct map_range {
 
 static int page_size_mask;
 
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+bool uderef_enabled __initdata = true;
+#endif
+
+static void __init enable_global_pages(void)
+{
+	if (kaiser_enabled)
+		return;
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (uderef_enabled &&
+	    (!IS_ENABLED(CONFIG_X86_SMAP) ||
+	     !boot_cpu_has(X86_FEATURE_SMAP) ||
+	     boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN)))
+		return;
+#endif
+
+	cr4_set_bits_and_update_boot(X86_CR4_PGE);
+	__supported_pte_mask |= _PAGE_GLOBAL;
+}
+
 static void __init probe_page_size_mask(void)
 {
 #if !defined(CONFIG_DEBUG_PAGEALLOC) && !defined(CONFIG_KMEMCHECK)
@@ -167,11 +193,8 @@ static void __init probe_page_size_mask(void)
 		cr4_set_bits_and_update_boot(X86_CR4_PSE);
 
 	/* Enable PGE if available */
-	if (cpu_has_pge && !kaiser_enabled) {
-		cr4_set_bits_and_update_boot(X86_CR4_PGE);
-		__supported_pte_mask |= _PAGE_GLOBAL;
-	} else
-		__supported_pte_mask &= ~_PAGE_GLOBAL;
+	if (cpu_has_pge)
+		enable_global_pages();
 
 	/* Enable 1 GB linear kernel mappings if available: */
 	if (direct_gbpages && cpu_has_gbpages) {
@@ -180,6 +203,142 @@ static void __init probe_page_size_mask(void)
 	} else {
 		direct_gbpages = 0;
 	}
+}
+
+static void __init setup_pcid(void)
+{
+	if (!IS_ENABLED(CONFIG_X86_64))
+		return;
+
+	if (!boot_cpu_has(X86_FEATURE_PCID))
+		return;
+
+	if (boot_cpu_has(X86_FEATURE_PGE)) {
+		cr4_set_bits(X86_CR4_PCIDE);
+		printk("PAX: PCID detected\n");
+
+		/*
+		 * INVPCID has two "groups" of types:
+		 * 1/2: Invalidate an individual address
+		 * 3/4: Invalidate all contexts
+		 *
+		 * 1/2 take a PCID, but 3/4 do not.  So, 3/4
+		 * ignore the PCID argument in the descriptor.
+		 * But, we have to be careful not to call 1/2
+		 * with an actual non-zero PCID in them before
+		 * we do the above cr4_set_bits().
+		 */
+		if (boot_cpu_has(X86_FEATURE_INVPCID)) {
+			setup_force_cpu_cap(X86_FEATURE_INVPCID_SINGLE);
+			printk("PAX: INVPCID detected\n");
+		}
+	} else {
+		/*
+		 * flush_tlb_all(), as currently implemented, won't
+		 * work if PCID is on but PGE is not.  Since that
+		 * combination doesn't exist on real hardware, there's
+		 * no reason to try to fully support it, but it's
+		 * polite to avoid corrupting data if we're on
+		 * an improperly configured VM.
+		 */
+		setup_clear_cpu_cap(X86_FEATURE_PCID);
+		setup_clear_cpu_cap(X86_FEATURE_INVPCID);
+	}
+}
+
+static void __init clone_page_range(pgd_t *dst, unsigned long start, unsigned long end)
+{
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_PER_CPU_PGD)
+	unsigned long addr = start, pfn;
+	unsigned int level;
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd, *src_pmd;
+
+	if (!boot_cpu_has(X86_FEATURE_UDEREF))
+		return;
+
+	src_pmd = (pmd_t *)lookup_address_in_pgd(swapper_pg_dir + pgd_index(start), start, &level);
+	BUG_ON(level != PG_LEVEL_2M);
+	pfn = pmd_pfn(*src_pmd) + pte_index(start);
+
+	pgd = pgd_offset_pgd(dst, addr);
+	BUG_ON(!pgd_none(*pgd));
+	set_pgd(pgd, __pgd((__PAGE_KERNEL_RX & ~_PAGE_GLOBAL) | __pa(level3_shadow_kernel_pgt)));
+
+	pud = pud_offset(pgd, addr);
+	BUG_ON(!pud_none(*pud));
+	set_pud(pud, __pud((__PAGE_KERNEL_RX & ~_PAGE_GLOBAL) | __pa(level2_shadow_kernel_pgt)));
+
+	pmd = pmd_offset(pud, addr);
+	BUG_ON(!pmd_none(*pmd));
+	set_pmd(pmd, __pmd((__PAGE_KERNEL_RX & ~_PAGE_GLOBAL) | __pa(level1_shadow_kernel_pgt)));
+
+	for (; addr < end; addr += PAGE_SIZE, pfn++) {
+		pte_t *pte;
+
+		pte = pte_offset_kernel(pmd, addr);
+		BUG_ON(!pte_none(*pte));
+		set_pte(pte, __pte((__PAGE_KERNEL_RX & ~_PAGE_GLOBAL) | (pfn << PAGE_SHIFT)));
+	}
+#endif
+
+}
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+static int __init setup_pax_nouderef(char *str)
+{
+#ifdef CONFIG_X86_32
+	unsigned int cpu;
+	struct desc_struct *gdt;
+
+	for (cpu = 0; cpu < nr_cpu_ids; cpu++) {
+		gdt = get_cpu_gdt_table(cpu);
+		gdt[GDT_ENTRY_KERNEL_DS].type = 3;
+		gdt[GDT_ENTRY_KERNEL_DS].limit = 0xf;
+		gdt[GDT_ENTRY_DEFAULT_USER_CS].limit = 0xf;
+		gdt[GDT_ENTRY_DEFAULT_USER_DS].limit = 0xf;
+	}
+	loadsegment(ds, __KERNEL_DS);
+	loadsegment(es, __KERNEL_DS);
+	loadsegment(ss, __KERNEL_DS);
+#endif
+
+	uderef_enabled = false;
+	return 0;
+}
+early_param("pax_nouderef", setup_pax_nouderef);
+#endif
+
+static void __init setup_uderef(void)
+{
+
+#ifdef CONFIG_PAX_MEMORY_UDEREF
+	if (!uderef_enabled || (IS_ENABLED(CONFIG_X86_64) && boot_cpu_has(X86_FEATURE_XENPV))) {
+		printk("PAX: UDEREF disabled\n");
+		return;
+	}
+
+#ifdef CONFIG_X86_64
+	if (IS_ENABLED(CONFIG_X86_SMAP) && boot_cpu_has(X86_FEATURE_SMAP)) {
+		printk("PAX: SMAP-based UDEREF enabled\n");
+		if (boot_cpu_has_bug(X86_BUG_CPU_MELTDOWN))
+			setup_force_cpu_cap(X86_FEATURE_UDEREF);
+	} else {
+		if (boot_cpu_has(X86_FEATURE_PCID))
+			printk("PAX: PCID-based UDEREF enabled\n");
+		else
+			printk("PAX: slow UDEREF enabled\n");
+		setup_force_cpu_cap(X86_FEATURE_UDEREF);
+	}
+#else
+	printk("PAX: segmentation based UDEREF enabled\n");
+	setup_force_cpu_cap(X86_FEATURE_UDEREF);
+	*(u32 *)(vdso_image_32.data + vdso_image_32.sym_VDSO32_NOTE_MASK) |= 1 << VDSO_NOTE_NOSEGNEG_BIT;
+#endif
+#endif
+
 }
 
 #ifdef CONFIG_X86_32
@@ -581,6 +740,7 @@ void __init init_mem_mapping(void)
 	unsigned long end;
 
 	probe_page_size_mask();
+	setup_pcid();
 
 #ifdef CONFIG_X86_64
 	end = max_pfn << PAGE_SHIFT;
@@ -620,7 +780,30 @@ void __init init_mem_mapping(void)
 	early_ioremap_page_table_range_init();
 #endif
 
+	setup_uderef();
+	clone_page_range(swapper_pg_dir + PTRS_PER_PGD, (unsigned long)__entry_text_start, (unsigned long)__irqentry_text_end);
+
+#ifdef CONFIG_PAX_PER_CPU_PGD
+	clone_pgd_range(get_cpu_pgd(0, kernel) + KERNEL_PGD_BOUNDARY,
+			swapper_pg_dir + KERNEL_PGD_BOUNDARY,
+			KERNEL_PGD_PTRS);
+
+#if defined(CONFIG_X86_64) && defined(CONFIG_PAX_MEMORY_UDEREF)
+	if (boot_cpu_has(X86_FEATURE_UDEREF)) {
+		clone_pgd_range(get_cpu_pgd(0, user) + pgd_index((unsigned long)__entry_text_start),
+				swapper_pg_dir + PTRS_PER_PGD + pgd_index((unsigned long)__entry_text_start),
+				1);
+		if (boot_cpu_has(X86_FEATURE_PCID) || !boot_cpu_has(X86_FEATURE_SMAP))
+			clone_pgd_range(get_cpu_pgd(0, uaccess) + KERNEL_PGD_BOUNDARY,
+					swapper_pg_dir + KERNEL_PGD_BOUNDARY,
+					KERNEL_PGD_PTRS);
+	}
+#endif
+	load_cr3(get_cpu_pgd(0, kernel));
+#else /* !CONFIG_PAX_PER_CPU_PGD */
 	load_cr3(swapper_pg_dir);
+#endif
+
 	__flush_tlb_all();
 
 	early_memtest(0, max_pfn_mapped << PAGE_SHIFT);
@@ -638,8 +821,40 @@ void __init init_mem_mapping(void)
  * Access has to be given to non-kernel-ram areas as well, these contain the
  * PCI mmio resources as well as potential bios/acpi data regions.
  */
+
+#ifdef CONFIG_GRKERNSEC_KMEM
+static unsigned int ebda_start __read_only;
+static unsigned int ebda_end __read_only;
+#endif
+
 int devmem_is_allowed(unsigned long pagenr)
 {
+#ifdef CONFIG_GRKERNSEC_KMEM
+	/* allow BDA */
+	if (!pagenr)
+		return 1;
+	/* allow EBDA */
+	if (pagenr >= ebda_start && pagenr < ebda_end)
+		return 1;
+	/* if tboot is in use, allow access to its hardcoded serial log range */
+	if (tboot_enabled() && ((0x60000 >> PAGE_SHIFT) <= pagenr) && (pagenr < (0x68000 >> PAGE_SHIFT)))
+		return 1;
+	if ((ISA_START_ADDRESS >> PAGE_SHIFT) <= pagenr && pagenr < (ISA_END_ADDRESS >> PAGE_SHIFT))
+		return 1;
+	/* throw out everything else below 1MB */
+	if (pagenr <= 256)
+		return 0;
+#else
+	if (!pagenr)
+		return 1;
+#ifdef CONFIG_VM86
+	if (pagenr < (ISA_START_ADDRESS >> PAGE_SHIFT))
+		return 1;
+#endif
+	if ((ISA_START_ADDRESS >> PAGE_SHIFT) <= pagenr && pagenr < (ISA_END_ADDRESS >> PAGE_SHIFT))
+		return 1;
+#endif
+
 	if (page_is_ram(pagenr)) {
 		/*
 		 * For disallowed memory regions in the low 1MB range,
@@ -704,8 +919,33 @@ void free_init_pages(char *what, unsigned long begin, unsigned long end)
 #endif
 }
 
+#ifdef CONFIG_GRKERNSEC_KMEM
+static inline void gr_init_ebda(void)
+{
+	unsigned int ebda_addr;
+	unsigned int ebda_size = 0;
+
+	ebda_addr = get_bios_ebda();
+	if (ebda_addr) {
+		ebda_size = *(unsigned char *)phys_to_virt(ebda_addr);
+		ebda_size <<= 10;
+	}
+	if (ebda_addr && ebda_size) {
+		ebda_start = ebda_addr >> PAGE_SHIFT;
+		ebda_end = min((unsigned int)PAGE_ALIGN(ebda_addr + ebda_size), (unsigned int)0xa0000) >> PAGE_SHIFT;
+	} else {
+		ebda_start = 0x9f000 >> PAGE_SHIFT;
+		ebda_end = 0xa0000 >> PAGE_SHIFT;
+	}
+}
+#else
+static inline void gr_init_ebda(void) { }
+#endif
+
 void free_initmem(void)
 {
+	gr_init_ebda();
+
 	free_init_pages("unused kernel",
 			(unsigned long)(&__init_begin),
 			(unsigned long)(&__init_end));

@@ -97,11 +97,11 @@ vxfs_blkiget(struct super_block *sbp, u_long extent, ino_t ino)
 
 	if (bp && buffer_mapped(bp)) {
 		struct vxfs_inode_info	*vip;
-		struct vxfs_dinode	*dip;
+		struct vxfs_inode_info	*dip;
 
 		if (!(vip = kmem_cache_alloc(vxfs_inode_cachep, GFP_KERNEL)))
 			goto fail;
-		dip = (struct vxfs_dinode *)(bp->b_data + offset);
+		dip = (struct vxfs_inode_info *)(bp->b_data + offset);
 		memcpy(vip, dip, sizeof(*vip));
 #ifdef DIAGNOSTIC
 		vxfs_dumpi(vip, ino);
@@ -138,12 +138,12 @@ __vxfs_iget(ino_t ino, struct inode *ilistp)
 
 	if (!IS_ERR(pp)) {
 		struct vxfs_inode_info	*vip;
-		struct vxfs_dinode	*dip;
+		struct vxfs_inode_info	*dip;
 		caddr_t			kaddr = (char *)page_address(pp);
 
 		if (!(vip = kmem_cache_alloc(vxfs_inode_cachep, GFP_KERNEL)))
 			goto fail;
-		dip = (struct vxfs_dinode *)(kaddr + offset);
+		dip = (struct vxfs_inode_info *)(kaddr + offset);
 		memcpy(vip, dip, sizeof(*vip));
 #ifdef DIAGNOSTIC
 		vxfs_dumpi(vip, ino);

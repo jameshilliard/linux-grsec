@@ -15,6 +15,7 @@
 #include <asm/processor-flags.h>
 #include <asm/segment.h>
 #include <asm/asm.h>
+#include <asm/nospec-branch.h>
 
 #include <xen/interface/xen.h>
 
@@ -99,7 +100,7 @@ ENTRY(xen_iret)
 	pushw %fs
 	movl $(__KERNEL_PERCPU), %eax
 	movl %eax, %fs
-	movl %fs:xen_vcpu, %eax
+	mov PER_CPU_VAR(xen_vcpu), %eax
 	POP_FS
 #else
 	movl %ss:xen_vcpu, %eax

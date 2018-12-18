@@ -95,7 +95,7 @@ struct rtnl_link_ops {
 						   const struct net_device *dev,
 						   const struct net_device *slave_dev);
 	struct net		*(*get_link_net)(const struct net_device *dev);
-};
+} __do_const;
 
 int __rtnl_link_register(struct rtnl_link_ops *ops);
 void __rtnl_link_unregister(struct rtnl_link_ops *ops);

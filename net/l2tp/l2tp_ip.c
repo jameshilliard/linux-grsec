@@ -184,13 +184,14 @@ pass_up:
 
 		read_lock_bh(&l2tp_ip_lock);
 		sk = __l2tp_ip_bind_lookup(net, iph->daddr, 0, tunnel_id);
+		if (!sk) {
+			read_unlock_bh(&l2tp_ip_lock);
+			goto discard;
+		}
+
+		sock_hold(sk);
 		read_unlock_bh(&l2tp_ip_lock);
 	}
-
-	if (sk == NULL)
-		goto discard;
-
-	sock_hold(sk);
 
 	if (!xfrm4_policy_check(sk, XFRM_POLICY_IN, skb))
 		goto discard_put;
@@ -340,7 +341,7 @@ static int l2tp_ip_disconnect(struct sock *sk, int flags)
 	if (sock_flag(sk, SOCK_ZAPPED))
 		return 0;
 
-	return udp_disconnect(sk, flags);
+	return __udp_disconnect(sk, flags);
 }
 
 static int l2tp_ip_getname(struct socket *sock, struct sockaddr *uaddr,
@@ -636,7 +637,7 @@ static struct inet_protosw l2tp_ip_protosw = {
 	.ops		= &l2tp_ip_ops,
 };
 
-static struct net_protocol l2tp_ip_protocol __read_mostly = {
+static const struct net_protocol l2tp_ip_protocol = {
 	.handler	= l2tp_ip_recv,
 	.netns_ok	= 1,
 };

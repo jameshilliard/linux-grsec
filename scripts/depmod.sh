@@ -11,6 +11,7 @@ KERNELRELEASE=$2
 SYMBOL_PREFIX=$3
 
 if ! test -r System.map ; then
+	echo "Warning: modules_install: missing 'System.map' file. Skipping depmod." >&2
 	exit 0
 fi
 

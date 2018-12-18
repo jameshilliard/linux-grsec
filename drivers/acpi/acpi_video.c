@@ -412,7 +412,7 @@ static int video_enable_only_lcd(const struct dmi_system_id *d)
 	return 0;
 }
 
-static struct dmi_system_id video_dmi_table[] = {
+static const struct dmi_system_id video_dmi_table[] = {
 	/*
 	 * Broken _BQC workaround http://bugzilla.kernel.org/show_bug.cgi?id=13121
 	 */

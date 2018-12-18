@@ -47,7 +47,7 @@ struct acpi_blacklist_item {
 	u32 is_critical_error;
 };
 
-static struct dmi_system_id acpi_osi_dmi_table[] __initdata;
+static const struct dmi_system_id acpi_osi_dmi_table[] __initconst;
 
 /*
  * POLICY: If *anything* doesn't work, put it on the blacklist.
@@ -168,7 +168,7 @@ static int __init dmi_enable_rev_override(const struct dmi_system_id *d)
 }
 #endif
 
-static struct dmi_system_id acpi_osi_dmi_table[] __initdata = {
+static const struct dmi_system_id acpi_osi_dmi_table[] __initconst = {
 	{
 	.callback = dmi_disable_osi_vista,
 	.ident = "Fujitsu Siemens",

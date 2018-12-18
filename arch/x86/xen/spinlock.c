@@ -337,11 +337,11 @@ void __init xen_init_spinlocks(void)
 #ifdef CONFIG_QUEUED_SPINLOCKS
 	__pv_init_lock_hash();
 	pv_lock_ops.queued_spin_lock_slowpath = __pv_queued_spin_lock_slowpath;
-	pv_lock_ops.queued_spin_unlock = PV_CALLEE_SAVE(__pv_queued_spin_unlock);
+	pv_lock_ops.queued_spin_unlock = PV_CALLEE_SAVE(queued_spin_unlock, __pv_queued_spin_unlock);
 	pv_lock_ops.wait = xen_qlock_wait;
 	pv_lock_ops.kick = xen_qlock_kick;
 #else
-	pv_lock_ops.lock_spinning = PV_CALLEE_SAVE(xen_lock_spinning);
+	pv_lock_ops.lock_spinning = PV_CALLEE_SAVE(lock_spinning, xen_lock_spinning);
 	pv_lock_ops.unlock_kick = xen_unlock_kick;
 #endif
 }

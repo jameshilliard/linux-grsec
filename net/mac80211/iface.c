@@ -551,7 +551,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 		break;
 	}
 
-	if (local->open_count == 0) {
+	if (local_read(&local->open_count) == 0) {
 		res = drv_start(local);
 		if (res)
 			goto err_del_bss;
@@ -598,7 +598,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 			res = drv_add_interface(local, sdata);
 			if (res)
 				goto err_stop;
-		} else if (local->monitors == 0 && local->open_count == 0) {
+		} else if (local->monitors == 0 && local_read(&local->open_count) == 0) {
 			res = ieee80211_add_virtual_monitor(local);
 			if (res)
 				goto err_stop;
@@ -707,7 +707,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 		atomic_inc(&local->iff_allmultis);
 
 	if (coming_up)
-		local->open_count++;
+		local_inc(&local->open_count);
 
 	if (hw_reconf_flags)
 		ieee80211_hw_config(local, hw_reconf_flags);
@@ -745,7 +745,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
  err_del_interface:
 	drv_remove_interface(local, sdata);
  err_stop:
-	if (!local->open_count)
+	if (!local_read(&local->open_count))
 		drv_stop(local);
  err_del_bss:
 	sdata->bss = NULL;
@@ -912,7 +912,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	}
 
 	if (going_down)
-		local->open_count--;
+		local_dec(&local->open_count);
 
 	switch (sdata->vif.type) {
 	case NL80211_IFTYPE_AP_VLAN:
@@ -984,7 +984,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 		atomic_set(&sdata->txqs_len[txqi->txq.ac], 0);
 	}
 
-	if (local->open_count == 0)
+	if (local_read(&local->open_count) == 0)
 		ieee80211_clear_tx_pending(local);
 
 	/*
@@ -1027,7 +1027,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	if (cancel_scan)
 		flush_delayed_work(&local->scan_work);
 
-	if (local->open_count == 0) {
+	if (local_read(&local->open_count) == 0) {
 		ieee80211_stop_device(local);
 
 		/* no reconfiguring after stop! */
@@ -1038,7 +1038,7 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	ieee80211_configure_filter(local);
 	ieee80211_hw_config(local, hw_reconf_flags);
 
-	if (local->monitors == local->open_count)
+	if (local->monitors == local_read(&local->open_count))
 		ieee80211_add_virtual_monitor(local);
 }
 
@@ -1898,8 +1898,8 @@ void ieee80211_remove_interfaces(struct ieee80211_local *local)
 	 */
 	cfg80211_shutdown_all_interfaces(local->hw.wiphy);
 
-	WARN(local->open_count, "%s: open count remains %d\n",
-	     wiphy_name(local->hw.wiphy), local->open_count);
+	WARN(local_read(&local->open_count), "%s: open count remains %ld\n",
+	     wiphy_name(local->hw.wiphy), local_read(&local->open_count));
 
 	mutex_lock(&local->iflist_mtx);
 	list_for_each_entry_safe(sdata, tmp, &local->interfaces, list) {

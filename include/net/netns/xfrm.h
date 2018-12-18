@@ -78,7 +78,7 @@ struct netns_xfrm {
 
 	/* flow cache part */
 	struct flow_cache	flow_cache_global;
-	atomic_t		flow_cache_genid;
+	atomic_unchecked_t	flow_cache_genid;
 	struct list_head	flow_cache_gc_list;
 	spinlock_t		flow_cache_gc_lock;
 	struct work_struct	flow_cache_gc_work;

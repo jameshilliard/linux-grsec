@@ -71,6 +71,8 @@ struct ipc_proc_iface {
 	int (*show)(struct seq_file *, void *);
 };
 
+extern int gr_ipc_permitted(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp, int requested_mode, int granted_mode);
+
 /**
  * ipc_init - initialise ipc subsystem
  *
@@ -407,7 +409,7 @@ void *ipc_alloc(int size)
 	if (size > PAGE_SIZE)
 		out = vmalloc(size);
 	else
-		out = kmalloc(size, GFP_KERNEL);
+		out = kmalloc(size, GFP_KERNEL|GFP_USERCOPY);
 	return out;
 }
 
@@ -494,6 +496,10 @@ int ipcperms(struct ipc_namespace *ns, struct kern_ipc_perm *ipcp, short flag)
 		granted_mode >>= 6;
 	else if (in_group_p(ipcp->cgid) || in_group_p(ipcp->gid))
 		granted_mode >>= 3;
+
+	if (!gr_ipc_permitted(ns, ipcp, requested_mode, granted_mode))
+		return -1;
+
 	/* is there some bit set in requested_mode but not in granted_mode? */
 	if ((requested_mode & ~granted_mode & 0007) &&
 	    !ns_capable(ns->user_ns, CAP_IPC_OWNER))

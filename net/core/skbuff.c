@@ -973,7 +973,8 @@ static void skb_headers_offset_update(struct sk_buff *skb, int off)
 	if (skb->ip_summed == CHECKSUM_PARTIAL)
 		skb->csum_start += off;
 	/* {transport,network,mac}_header and tail are relative to skb->head */
-	skb->transport_header += off;
+	if (skb_transport_header_was_set(skb))
+		skb->transport_header += off;
 	skb->network_header   += off;
 	if (skb_mac_header_was_set(skb))
 		skb->mac_header += off;
@@ -1498,6 +1499,8 @@ done:
 		skb_set_tail_pointer(skb, len);
 	}
 
+	if (!skb->sk || skb->destructor == sock_edemux)
+		skb_condense(skb);
 	return 0;
 }
 EXPORT_SYMBOL(___pskb_trim);
@@ -2107,7 +2110,7 @@ EXPORT_SYMBOL(__skb_checksum);
 __wsum skb_checksum(const struct sk_buff *skb, int offset,
 		    int len, __wsum csum)
 {
-	const struct skb_checksum_ops ops = {
+	static const struct skb_checksum_ops ops = {
 		.update  = csum_partial_ext,
 		.combine = csum_block_add_ext,
 	};
@@ -3342,12 +3345,14 @@ void __init skb_init(void)
 	skbuff_head_cache = kmem_cache_create("skbuff_head_cache",
 					      sizeof(struct sk_buff),
 					      0,
-					      SLAB_HWCACHE_ALIGN|SLAB_PANIC,
+					      SLAB_HWCACHE_ALIGN|SLAB_PANIC|
+					      SLAB_NO_SANITIZE,
 					      NULL);
 	skbuff_fclone_cache = kmem_cache_create("skbuff_fclone_cache",
 						sizeof(struct sk_buff_fclones),
 						0,
-						SLAB_HWCACHE_ALIGN|SLAB_PANIC,
+						SLAB_HWCACHE_ALIGN|SLAB_PANIC|
+						SLAB_NO_SANITIZE,
 						NULL);
 }
 
@@ -3684,6 +3689,7 @@ static void __skb_complete_tx_timestamp(struct sk_buff *skb,
 	serr->ee.ee_errno = ENOMSG;
 	serr->ee.ee_origin = SO_EE_ORIGIN_TIMESTAMPING;
 	serr->ee.ee_info = tstype;
+	serr->header.h4.iif = skb->dev ? skb->dev->ifindex : 0;
 	if (sk->sk_tsflags & SOF_TIMESTAMPING_OPT_ID) {
 		serr->ee.ee_data = skb_shinfo(skb)->tskey;
 		if (sk->sk_protocol == IPPROTO_TCP &&
@@ -3818,14 +3824,16 @@ EXPORT_SYMBOL_GPL(skb_complete_wifi_ack);
  */
 bool skb_partial_csum_set(struct sk_buff *skb, u16 start, u16 off)
 {
-	if (unlikely(start > skb_headlen(skb)) ||
-	    unlikely((int)start + off > skb_headlen(skb) - 2)) {
-		net_warn_ratelimited("bad partial csum: csum=%u/%u len=%u\n",
-				     start, off, skb_headlen(skb));
+	u32 csum_end = (u32)start + (u32)off + sizeof(__sum16);
+	u32 csum_start = skb_headroom(skb) + (u32)start;
+
+	if (unlikely(csum_start > U16_MAX || csum_end > skb_headlen(skb))) {
+		net_warn_ratelimited("bad partial csum: csum=%u/%u headroom=%u headlen=%u\n",
+				     start, off, skb_headroom(skb), skb_headlen(skb));
 		return false;
 	}
 	skb->ip_summed = CHECKSUM_PARTIAL;
-	skb->csum_start = skb_headroom(skb) + start;
+	skb->csum_start = csum_start;
 	skb->csum_offset = off;
 	skb_set_transport_header(skb, start);
 	return true;
@@ -4528,8 +4536,7 @@ struct sk_buff *alloc_skb_with_frags(unsigned long header_len,
 			if (npages >= 1 << order) {
 				page = alloc_pages((gfp_mask & ~__GFP_DIRECT_RECLAIM) |
 						   __GFP_COMP |
-						   __GFP_NOWARN |
-						   __GFP_NORETRY,
+						   __GFP_NOWARN,
 						   order);
 				if (page)
 					goto fill_page;
@@ -4556,3 +4563,31 @@ failure:
 	return NULL;
 }
 EXPORT_SYMBOL(alloc_skb_with_frags);
+
+/**
+ * skb_condense - try to get rid of fragments/frag_list if possible
+ * @skb: buffer
+ *
+ * Can be used to save memory before skb is added to a busy queue.
+ * If packet has bytes in frags and enough tail room in skb->head,
+ * pull all of them, so that we can free the frags right now and adjust
+ * truesize.
+ * Notes:
+ *	We do not reallocate skb->head thus can not fail.
+ *	Caller must re-evaluate skb->truesize if needed.
+ */
+void skb_condense(struct sk_buff *skb)
+{
+	if (!skb->data_len ||
+	    skb->data_len > skb->end - skb->tail ||
+	    skb_cloned(skb))
+		return;
+
+	/* Nice, we can free page frag(s) right now */
+	__pskb_pull_tail(skb, skb->data_len);
+
+	/* Now adjust skb->truesize, since __pskb_pull_tail() does
+	 * not do this.
+	 */
+	skb->truesize = SKB_TRUESIZE(skb_end_offset(skb));
+}

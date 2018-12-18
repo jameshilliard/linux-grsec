@@ -52,6 +52,7 @@ int rxrpc_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
 	struct sk_buff *skb;
 	long timeo;
 	int copy, ret, ullen, offset, copied = 0;
+	unsigned long idl;
 	u32 abort_code;
 
 	DEFINE_WAIT(wait);
@@ -161,9 +162,10 @@ int rxrpc_recvmsg(struct socket *sock, struct msghdr *msg, size_t len,
 		       ntohl(sp->hdr.seq), skb->len, sp->offset);
 
 		if (!continue_call) {
+			idl = call->user_call_ID;
 			/* only set the control data once per recvmsg() */
 			ret = put_cmsg(msg, SOL_RXRPC, RXRPC_USER_CALL_ID,
-				       ullen, &call->user_call_ID);
+				       ullen, &idl);
 			if (ret < 0)
 				goto copy_error;
 			ASSERT(test_bit(RXRPC_CALL_HAS_USERID, &call->flags));
@@ -272,8 +274,9 @@ receive_non_data_message:
 		goto out;
 	}
 
+	idl = call->user_call_ID;
 	ret = put_cmsg(msg, SOL_RXRPC, RXRPC_USER_CALL_ID,
-		       ullen, &call->user_call_ID);
+		       ullen, &idl);
 	if (ret < 0)
 		goto copy_error;
 	ASSERT(test_bit(RXRPC_CALL_HAS_USERID, &call->flags));

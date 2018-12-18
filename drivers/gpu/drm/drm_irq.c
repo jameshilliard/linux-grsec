@@ -1643,6 +1643,11 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
+static void drm_vblank_dmabuf_destroy(struct drm_pending_event *event)
+{
+	kfree(event);
+}
+
 static int drm_queue_vblank_event(struct drm_device *dev, unsigned int pipe,
 				  union drm_wait_vblank *vblwait,
 				  struct drm_file *file_priv)
@@ -1667,7 +1672,7 @@ static int drm_queue_vblank_event(struct drm_device *dev, unsigned int pipe,
 	e->event.user_data = vblwait->request.signal;
 	e->base.event = &e->event.base;
 	e->base.file_priv = file_priv;
-	e->base.destroy = (void (*) (struct drm_pending_event *)) kfree;
+	e->base.destroy = drm_vblank_dmabuf_destroy;
 
 	spin_lock_irqsave(&dev->event_lock, flags);
 

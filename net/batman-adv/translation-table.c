@@ -607,7 +607,7 @@ bool batadv_tt_local_add(struct net_device *soft_iface, const u8 *addr,
 	batadv_dbg(BATADV_DBG_TT, bat_priv,
 		   "Creating new local tt entry: %pM (vid: %d, ttvn: %d)\n",
 		   addr, BATADV_PRINT_VID(vid),
-		   (u8)atomic_read(&bat_priv->tt.vn));
+		   (u8)atomic_read_unchecked(&bat_priv->tt.vn));
 
 	ether_addr_copy(tt_local->common.addr, addr);
 	/* The local entry has to be marked as NEW to avoid to send it in
@@ -837,7 +837,7 @@ batadv_tt_prepare_tvlv_local_data(struct batadv_priv *bat_priv,
 	}
 
 	(*tt_data)->flags = BATADV_NO_FLAGS;
-	(*tt_data)->ttvn = atomic_read(&bat_priv->tt.vn);
+	(*tt_data)->ttvn = atomic_read_unchecked(&bat_priv->tt.vn);
 	(*tt_data)->num_vlan = htons(num_vlan);
 
 	tt_vlan = (struct batadv_tvlv_tt_vlan_data *)(*tt_data + 1);
@@ -956,7 +956,7 @@ int batadv_tt_local_seq_print_text(struct seq_file *seq, void *offset)
 
 	seq_printf(seq,
 		   "Locally retrieved addresses (from %s) announced via TT (TTVN: %u):\n",
-		   net_dev->name, (u8)atomic_read(&bat_priv->tt.vn));
+		   net_dev->name, (u8)atomic_read_unchecked(&bat_priv->tt.vn));
 	seq_printf(seq, "       %-13s  %s %-8s %-9s (%-10s)\n", "Client", "VID",
 		   "Flags", "Last seen", "CRC");
 
@@ -2230,6 +2230,29 @@ static u32 batadv_tt_local_crc(struct batadv_priv *bat_priv,
 	return crc;
 }
 
+/**
+ * batadv_tt_req_node_release - free tt_req node entry
+ * @ref: kref pointer of the tt req_node entry
+ */
+static void batadv_tt_req_node_release(struct kref *ref)
+{
+	struct batadv_tt_req_node *tt_req_node;
+
+	tt_req_node = container_of(ref, struct batadv_tt_req_node, refcount);
+
+	kfree(tt_req_node);
+}
+
+/**
+ * batadv_tt_req_node_put - decrement the tt_req_node refcounter and
+ *  possibly release it
+ * @tt_req_node: tt_req_node to be free'd
+ */
+static void batadv_tt_req_node_put(struct batadv_tt_req_node *tt_req_node)
+{
+	kref_put(&tt_req_node->refcount, batadv_tt_req_node_release);
+}
+
 static void batadv_tt_req_list_free(struct batadv_priv *bat_priv)
 {
 	struct batadv_tt_req_node *node;
@@ -2239,7 +2262,7 @@ static void batadv_tt_req_list_free(struct batadv_priv *bat_priv)
 
 	hlist_for_each_entry_safe(node, safe, &bat_priv->tt.req_list, list) {
 		hlist_del_init(&node->list);
-		kfree(node);
+		batadv_tt_req_node_put(node);
 	}
 
 	spin_unlock_bh(&bat_priv->tt.req_list_lock);
@@ -2276,7 +2299,7 @@ static void batadv_tt_req_purge(struct batadv_priv *bat_priv)
 		if (batadv_has_timed_out(node->issued_at,
 					 BATADV_TT_REQUEST_TIMEOUT)) {
 			hlist_del_init(&node->list);
-			kfree(node);
+			batadv_tt_req_node_put(node);
 		}
 	}
 	spin_unlock_bh(&bat_priv->tt.req_list_lock);
@@ -2308,9 +2331,11 @@ batadv_tt_req_node_new(struct batadv_priv *bat_priv,
 	if (!tt_req_node)
 		goto unlock;
 
+	kref_init(&tt_req_node->refcount);
 	ether_addr_copy(tt_req_node->addr, orig_node->orig);
 	tt_req_node->issued_at = jiffies;
 
+	kref_get(&tt_req_node->refcount);
 	hlist_add_head(&tt_req_node->list, &bat_priv->tt.req_list);
 unlock:
 	spin_unlock_bh(&bat_priv->tt.req_list_lock);
@@ -2560,13 +2585,19 @@ static int batadv_send_tt_request(struct batadv_priv *bat_priv,
 out:
 	if (primary_if)
 		batadv_hardif_free_ref(primary_if);
+
 	if (ret && tt_req_node) {
 		spin_lock_bh(&bat_priv->tt.req_list_lock);
-		/* hlist_del_init() verifies tt_req_node still is in the list */
-		hlist_del_init(&tt_req_node->list);
+		if (!hlist_unhashed(&tt_req_node->list)) {
+			hlist_del_init(&tt_req_node->list);
+			batadv_tt_req_node_put(tt_req_node);
+		}
 		spin_unlock_bh(&bat_priv->tt.req_list_lock);
-		kfree(tt_req_node);
 	}
+
+	if (tt_req_node)
+		batadv_tt_req_node_put(tt_req_node);
+
 	kfree(tvlv_tt_data);
 	return ret;
 }
@@ -2733,7 +2764,7 @@ static bool batadv_send_my_tt_response(struct batadv_priv *bat_priv,
 
 	spin_lock_bh(&bat_priv->tt.commit_lock);
 
-	my_ttvn = (u8)atomic_read(&bat_priv->tt.vn);
+	my_ttvn = (u8)atomic_read_unchecked(&bat_priv->tt.vn);
 	req_ttvn = tt_data->ttvn;
 
 	orig_node = batadv_orig_hash_find(bat_priv, req_src);
@@ -2772,7 +2803,7 @@ static bool batadv_send_my_tt_response(struct batadv_priv *bat_priv,
 		       bat_priv->tt.last_changeset_len);
 		spin_unlock_bh(&bat_priv->tt.last_changeset_lock);
 	} else {
-		req_ttvn = (u8)atomic_read(&bat_priv->tt.vn);
+		req_ttvn = (u8)atomic_read_unchecked(&bat_priv->tt.vn);
 
 		/* allocate the tvlv, put the tt_data and all the tt_vlan_data
 		 * in the initial part
@@ -3002,7 +3033,7 @@ static void batadv_handle_tt_response(struct batadv_priv *bat_priv,
 		if (!batadv_compare_eth(node->addr, resp_src))
 			continue;
 		hlist_del_init(&node->list);
-		kfree(node);
+		batadv_tt_req_node_put(node);
 	}
 
 	spin_unlock_bh(&bat_priv->tt.req_list_lock);
@@ -3294,10 +3325,10 @@ static void batadv_tt_local_commit_changes_nolock(struct batadv_priv *bat_priv)
 	batadv_tt_local_update_crc(bat_priv);
 
 	/* Increment the TTVN only once per OGM interval */
-	atomic_inc(&bat_priv->tt.vn);
+	atomic_inc_unchecked(&bat_priv->tt.vn);
 	batadv_dbg(BATADV_DBG_TT, bat_priv,
 		   "Local changes committed, updating to ttvn %u\n",
-		   (u8)atomic_read(&bat_priv->tt.vn));
+		   (u8)atomic_read_unchecked(&bat_priv->tt.vn));
 
 	/* reset the sending counter */
 	atomic_set(&bat_priv->tt.ogm_append_cnt, BATADV_TT_OGM_APPEND_MAX);

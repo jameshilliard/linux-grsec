@@ -25,7 +25,7 @@ DECLARE_PER_CPU_READ_MOSTLY(cpumask_var_t, cpu_core_map);
 /* cpus sharing the last level cache: */
 DECLARE_PER_CPU_READ_MOSTLY(cpumask_var_t, cpu_llc_shared_map);
 DECLARE_PER_CPU_READ_MOSTLY(u16, cpu_llc_id);
-DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
+DECLARE_PER_CPU_READ_MOSTLY(unsigned int, cpu_number);
 
 static inline struct cpumask *cpu_llc_shared_mask(int cpu)
 {
@@ -58,7 +58,7 @@ struct smp_ops {
 
 	void (*send_call_func_ipi)(const struct cpumask *mask);
 	void (*send_call_func_single_ipi)(int cpu);
-};
+} __no_const;
 
 /* Globals due to paravirt */
 extern void set_cpu_sibling_map(int cpu);
@@ -158,6 +158,7 @@ static inline int wbinvd_on_all_cpus(void)
 	wbinvd();
 	return 0;
 }
+#define smp_num_siblings	1
 #endif /* CONFIG_SMP */
 
 extern unsigned disabled_cpus;
@@ -172,14 +173,8 @@ extern unsigned disabled_cpus;
 extern int safe_smp_processor_id(void);
 
 #elif defined(CONFIG_X86_64_SMP)
-#define raw_smp_processor_id() (this_cpu_read(cpu_number))
-
-#define stack_smp_processor_id()					\
-({								\
-	struct thread_info *ti;						\
-	__asm__("andq %%rsp,%0; ":"=r" (ti) : "0" (CURRENT_MASK));	\
-	ti->cpu;							\
-})
+#define raw_smp_processor_id()		(this_cpu_read(cpu_number))
+#define stack_smp_processor_id()	raw_smp_processor_id()
 #define safe_smp_processor_id()		smp_processor_id()
 
 #endif

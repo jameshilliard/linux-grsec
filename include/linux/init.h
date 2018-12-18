@@ -46,7 +46,7 @@
 
 /* These are for everybody (although not all archs will actually
    discard it in modules) */
-#define __init		__section(.init.text) __cold notrace __noretpoline
+#define __init		__section(.init.text) __cold notrace __noretpoline __latent_entropy
 #define __initdata	__section(.init.data)
 #define __initconst	__constsection(.init.rodata)
 #define __exitdata	__section(.exit.data)
@@ -99,7 +99,7 @@
 #define __exit          __section(.exit.text) __exitused __cold notrace
 
 /* Used for MEMORY_HOTPLUG */
-#define __meminit        __section(.meminit.text) __cold notrace
+#define __meminit        __section(.meminit.text) __cold notrace __latent_entropy
 #define __meminitdata    __section(.meminit.data)
 #define __meminitconst   __constsection(.meminit.rodata)
 #define __memexit        __section(.memexit.text) __exitused __cold notrace
@@ -123,6 +123,12 @@
 #define __REF            .section       ".ref.text", "ax"
 #define __REFDATA        .section       ".ref.data", "aw"
 #define __REFCONST       .section       ".ref.rodata", "a"
+
+#ifdef CONFIG_PAX_KERNEXEC
+#define __READ_ONLY	.section	".data..read_only","a",%progbits
+#else
+#define __READ_ONLY	.section	".data..mostly","aw",%progbits
+#endif
 
 #ifndef __ASSEMBLY__
 /*

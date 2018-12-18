@@ -304,7 +304,7 @@ static int lsm_unpackmd_v3(struct lov_obd *lov, struct lov_stripe_md *lsm,
 
 	stripe_count = lsm_is_released(lsm) ? 0 : lsm->lsm_stripe_count;
 
-	cplen = strlcpy(lsm->lsm_pool_name, lmm->lmm_pool_name,
+	cplen = strlcpy_check(lsm->lsm_pool_name, lmm->lmm_pool_name,
 			sizeof(lsm->lsm_pool_name));
 	if (cplen >= sizeof(lsm->lsm_pool_name))
 		return -E2BIG;

@@ -40,7 +40,7 @@
 #define BYTES_PER_WORD		4
 
 static int cryp_mode;
-static atomic_t session_id;
+static atomic_unchecked_t session_id;
 
 static struct stedma40_chan_cfg *mem_to_engine;
 static struct stedma40_chan_cfg *engine_to_mem;
@@ -181,10 +181,10 @@ static void add_session_id(struct cryp_ctx *ctx)
 	 * We never want 0 to be a valid value, since this is the default value
 	 * for the software context.
 	 */
-	if (unlikely(atomic_inc_and_test(&session_id)))
-		atomic_inc(&session_id);
+	if (unlikely(atomic_inc_and_test_unchecked(&session_id)))
+		atomic_inc_unchecked(&session_id);
 
-	ctx->session_id = atomic_read(&session_id);
+	ctx->session_id = atomic_read_unchecked(&session_id);
 }
 
 static irqreturn_t cryp_interrupt_handler(int irq, void *param)
@@ -403,7 +403,7 @@ static int cryp_setup_context(struct cryp_ctx *ctx,
 				       &control_register);
 		add_session_id(ctx);
 	} else if (ctx->updated == 1 &&
-		   ctx->session_id != atomic_read(&session_id)) {
+		   ctx->session_id != atomic_read_unchecked(&session_id)) {
 		cryp_flush_inoutfifo(device_data);
 		cryp_restore_device_context(device_data, &ctx->dev_ctx);
 
@@ -1520,7 +1520,7 @@ static int ux500_cryp_probe(struct platform_device *pdev)
 	/* ... and signal that a new device is available. */
 	up(&driver_data.device_allocation);
 
-	atomic_set(&session_id, 1);
+	atomic_set_unchecked(&session_id, 1);
 
 	ret = cryp_algs_register_all();
 	if (ret) {

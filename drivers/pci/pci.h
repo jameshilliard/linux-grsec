@@ -103,7 +103,7 @@ struct pci_vpd_ops {
 struct pci_vpd {
 	unsigned int len;
 	const struct pci_vpd_ops *ops;
-	struct bin_attribute *attr; /* descriptor for sysfs VPD entry */
+	bin_attribute_no_const *attr; /* descriptor for sysfs VPD entry */
 };
 
 int pci_vpd_pci22_init(struct pci_dev *dev);
@@ -299,7 +299,7 @@ static inline int pci_iov_bus_range(struct pci_bus *bus)
 
 #endif /* CONFIG_PCI_IOV */
 
-unsigned long pci_cardbus_resource_alignment(struct resource *);
+unsigned long pci_cardbus_resource_alignment(const struct resource *);
 
 static inline resource_size_t pci_resource_alignment(struct pci_dev *dev,
 						     struct resource *res)

@@ -485,7 +485,7 @@ static void macvtap_setup(struct net_device *dev)
 	dev->tx_queue_len = TUN_READQ_SIZE;
 }
 
-static struct rtnl_link_ops macvtap_link_ops __read_mostly = {
+static struct rtnl_link_ops macvtap_link_ops = {
 	.kind		= "macvtap",
 	.setup		= macvtap_setup,
 	.newlink	= macvtap_newlink,
@@ -785,13 +785,8 @@ static ssize_t macvtap_get_user(struct macvtap_queue *q, struct msghdr *m,
 
 	if (zerocopy)
 		err = zerocopy_sg_from_iter(skb, from);
-	else {
+	else
 		err = skb_copy_datagram_from_iter(skb, 0, from, len);
-		if (!err && m && m->msg_control) {
-			struct ubuf_info *uarg = m->msg_control;
-			uarg->callback(uarg, false);
-		}
-	}
 
 	if (err)
 		goto err_kfree;
@@ -821,7 +816,11 @@ static ssize_t macvtap_get_user(struct macvtap_queue *q, struct msghdr *m,
 		skb_shinfo(skb)->destructor_arg = m->msg_control;
 		skb_shinfo(skb)->tx_flags |= SKBTX_DEV_ZEROCOPY;
 		skb_shinfo(skb)->tx_flags |= SKBTX_SHARED_FRAG;
+	} else if (m && m->msg_control) {
+		struct ubuf_info *uarg = m->msg_control;
+		uarg->callback(uarg, false);
 	}
+
 	if (vlan) {
 		skb->dev = vlan->dev;
 		dev_queue_xmit(skb);
@@ -1094,7 +1093,7 @@ static long macvtap_ioctl(struct file *file, unsigned int cmd,
 
 		ret = 0;
 		u = q->flags;
-		if (copy_to_user(&ifr->ifr_name, vlan->dev->name, IFNAMSIZ) ||
+		if (copy_to_user(ifr->ifr_name, vlan->dev->name, IFNAMSIZ) ||
 		    put_user(u, &ifr->ifr_flags))
 			ret = -EFAULT;
 		macvtap_put_vlan(vlan);
@@ -1179,8 +1178,8 @@ static long macvtap_ioctl(struct file *file, unsigned int cmd,
 		}
 		ret = 0;
 		u = vlan->dev->type;
-		if (copy_to_user(&ifr->ifr_name, vlan->dev->name, IFNAMSIZ) ||
-		    copy_to_user(&ifr->ifr_hwaddr.sa_data, vlan->dev->dev_addr, ETH_ALEN) ||
+		if (copy_to_user(ifr->ifr_name, vlan->dev->name, IFNAMSIZ) ||
+		    copy_to_user(ifr->ifr_hwaddr.sa_data, vlan->dev->dev_addr, ETH_ALEN) ||
 		    put_user(u, &ifr->ifr_hwaddr.sa_family))
 			ret = -EFAULT;
 		macvtap_put_vlan(vlan);
@@ -1314,7 +1313,7 @@ static int macvtap_device_event(struct notifier_block *unused,
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block macvtap_notifier_block __read_mostly = {
+static struct notifier_block macvtap_notifier_block = {
 	.notifier_call	= macvtap_device_event,
 };
 

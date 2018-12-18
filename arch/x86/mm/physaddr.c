@@ -89,7 +89,7 @@ bool __virt_addr_valid(unsigned long x)
 		return false;
 	if (__vmalloc_start_set && is_vmalloc_addr((void *) x))
 		return false;
-	if (x >= FIXADDR_START)
+	if (x >= PKMAP_BASE)
 		return false;
 	return pfn_valid((x - PAGE_OFFSET) >> PAGE_SHIFT);
 }

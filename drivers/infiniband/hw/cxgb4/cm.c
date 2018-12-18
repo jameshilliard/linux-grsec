@@ -2231,8 +2231,13 @@ static int close_listsrv_rpl(struct c4iw_dev *dev, struct sk_buff *skb)
 	unsigned int stid = GET_TID(rpl);
 	struct c4iw_listen_ep *ep = lookup_stid(t, stid);
 
+	if (!ep) {
+		PDBG("%s stid %d lookup failure!\n", __func__, stid);
+		goto out;
+	}
 	PDBG("%s ep %p\n", __func__, ep);
 	c4iw_wake_up(&ep->com.wr_wait, status2errno(rpl->status));
+out:
 	return 0;
 }
 
@@ -3416,6 +3421,7 @@ int c4iw_create_listen(struct iw_cm_id *cm_id, int backlog)
 	}
 
 fail3:
+	remove_handle(ep->com.dev, &ep->com.dev->stid_idr, ep->stid);
 	cxgb4_free_stid(ep->com.dev->rdev.lldi.tids, ep->stid,
 			ep->com.local_addr.ss_family);
 fail2:

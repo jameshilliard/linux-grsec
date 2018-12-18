@@ -1758,7 +1758,7 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 	bool suspended = local->suspended;
 
 	/* nothing to do if HW shouldn't run */
-	if (!local->open_count)
+	if (!local_read(&local->open_count))
 		goto wake_up;
 
 #ifdef CONFIG_PM
@@ -2052,7 +2052,7 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 	local->in_reconfig = false;
 	barrier();
 
-	if (local->monitors == local->open_count && local->monitors > 0)
+	if (local->monitors == local_read(&local->open_count) && local->monitors > 0)
 		ieee80211_add_virtual_monitor(local);
 
 	/*
@@ -2086,7 +2086,7 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 	 * If this is for hw restart things are still running.
 	 * We may want to change that later, however.
 	 */
-	if (local->open_count && (!suspended || reconfig_due_to_wowlan))
+	if (local_read(&local->open_count) && (!suspended || reconfig_due_to_wowlan))
 		drv_reconfig_complete(local, IEEE80211_RECONFIG_TYPE_RESTART);
 
 	if (!suspended)
@@ -2100,7 +2100,7 @@ int ieee80211_reconfig(struct ieee80211_local *local)
 
 	ieee80211_flush_completed_scan(local, false);
 
-	if (local->open_count && !reconfig_due_to_wowlan)
+	if (local_read(&local->open_count) && !reconfig_due_to_wowlan)
 		drv_reconfig_complete(local, IEEE80211_RECONFIG_TYPE_SUSPEND);
 
 	list_for_each_entry(sdata, &local->interfaces, list) {

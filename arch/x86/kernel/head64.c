@@ -30,6 +30,11 @@
 #include <asm/microcode.h>
 #include <asm/kasan.h>
 
+struct desc_ptr early_gdt_descr __read_only = {
+	.size = GDT_ENTRIES*8 - 1,
+	.address = (unsigned long)&cpu_gdt_table
+};
+
 /*
  * Manage page tables very early on.
  */
@@ -69,12 +74,12 @@ again:
 	pgd = *pgd_p;
 
 	/*
-	 * The use of __START_KERNEL_map rather than __PAGE_OFFSET here is
-	 * critical -- __PAGE_OFFSET would point us back into the dynamic
+	 * The use of __early_va rather than __va here is critical:
+	 * __va would point us back into the dynamic
 	 * range and we might end up looping forever...
 	 */
 	if (pgd)
-		pud_p = (pudval_t *)((pgd & PTE_PFN_MASK) + __START_KERNEL_map - phys_base);
+		pud_p = (pudval_t *)(__early_va(pgd & PTE_PFN_MASK));
 	else {
 		if (next_early_pgt >= EARLY_DYNAMIC_PAGE_TABLES) {
 			reset_early_page_tables();
@@ -84,13 +89,13 @@ again:
 		pud_p = (pudval_t *)early_dynamic_pgts[next_early_pgt++];
 		for (i = 0; i < PTRS_PER_PUD; i++)
 			pud_p[i] = 0;
-		*pgd_p = (pgdval_t)pud_p - __START_KERNEL_map + phys_base + _KERNPG_TABLE;
+		*pgd_p = (pgdval_t)__pa(pud_p) + _KERNPG_TABLE;
 	}
 	pud_p += pud_index(address);
 	pud = *pud_p;
 
 	if (pud)
-		pmd_p = (pmdval_t *)((pud & PTE_PFN_MASK) + __START_KERNEL_map - phys_base);
+		pmd_p = (pmdval_t *)(__early_va(pud & PTE_PFN_MASK));
 	else {
 		if (next_early_pgt >= EARLY_DYNAMIC_PAGE_TABLES) {
 			reset_early_page_tables();
@@ -100,7 +105,7 @@ again:
 		pmd_p = (pmdval_t *)early_dynamic_pgts[next_early_pgt++];
 		for (i = 0; i < PTRS_PER_PMD; i++)
 			pmd_p[i] = 0;
-		*pud_p = (pudval_t)pmd_p - __START_KERNEL_map + phys_base + _KERNPG_TABLE;
+		*pud_p = (pudval_t)__pa(pmd_p) + _KERNPG_TABLE;
 	}
 	pmd = (physaddr & PMD_MASK) + early_pmd_flags;
 	pmd_p[pmd_index(address)] = pmd;
@@ -139,7 +144,7 @@ static void __init copy_bootdata(char *real_mode_data)
 	}
 }
 
-asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
+asmlinkage __visible void __init __noreturn x86_64_start_kernel(char * real_mode_data)
 {
 	int i;
 
@@ -164,8 +169,6 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 
 	clear_bss();
 
-	clear_page(init_level4_pgt);
-
 	kasan_early_init();
 
 	for (i = 0; i < NUM_EXCEPTION_VECTORS; i++)
@@ -185,7 +188,7 @@ asmlinkage __visible void __init x86_64_start_kernel(char * real_mode_data)
 	x86_64_start_reservations(real_mode_data);
 }
 
-void __init x86_64_start_reservations(char *real_mode_data)
+void __init __noreturn x86_64_start_reservations(char *real_mode_data)
 {
 	/* version is always not zero if it is copied */
 	if (!boot_params.hdr.version)

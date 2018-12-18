@@ -171,8 +171,8 @@ static inline pid_t pid_nr(struct pid *pid)
 	return nr;
 }
 
-pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns);
-pid_t pid_vnr(struct pid *pid);
+pid_t pid_nr_ns(const struct pid *pid, const struct pid_namespace *ns);
+pid_t pid_vnr(const struct pid *pid);
 
 #define do_each_pid_task(pid, type, task)				\
 	do {								\
@@ -193,10 +193,10 @@ pid_t pid_vnr(struct pid *pid);
 #define do_each_pid_thread(pid, type, task)				\
 	do_each_pid_task(pid, type, task) {				\
 		struct task_struct *tg___ = task;			\
-		do {
+		for_each_thread(tg___, task) {
 
 #define while_each_pid_thread(pid, type, task)				\
-		} while_each_thread(tg___, task);			\
+		}							\
 		task = tg___;						\
 	} while_each_pid_task(pid, type, task)
 #endif /* _LINUX_PID_H */

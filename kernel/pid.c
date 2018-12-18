@@ -33,6 +33,7 @@
 #include <linux/rculist.h>
 #include <linux/bootmem.h>
 #include <linux/hash.h>
+#include <linux/security.h>
 #include <linux/pid_namespace.h>
 #include <linux/init_task.h>
 #include <linux/syscalls.h>
@@ -47,7 +48,7 @@ struct pid init_struct_pid = INIT_STRUCT_PID;
 
 int pid_max = PID_MAX_DEFAULT;
 
-#define RESERVED_PIDS		300
+#define RESERVED_PIDS		500
 
 int pid_max_min = RESERVED_PIDS + 1;
 int pid_max_max = PID_MAX_LIMIT;
@@ -453,14 +454,29 @@ EXPORT_SYMBOL(pid_task);
  */
 struct task_struct *find_task_by_pid_ns(pid_t nr, struct pid_namespace *ns)
 {
+	struct task_struct *task;
+
 	RCU_LOCKDEP_WARN(!rcu_read_lock_held(),
 			 "find_task_by_pid_ns() needs rcu_read_lock() protection");
-	return pid_task(find_pid_ns(nr, ns), PIDTYPE_PID);
+
+	task = pid_task(find_pid_ns(nr, ns), PIDTYPE_PID);
+
+	if (gr_pid_is_chrooted(task))
+		return NULL;
+
+	return task;
 }
 
 struct task_struct *find_task_by_vpid(pid_t vnr)
 {
 	return find_task_by_pid_ns(vnr, task_active_pid_ns(current));
+}
+
+struct task_struct *find_task_by_vpid_unrestricted(pid_t vnr)
+{
+	RCU_LOCKDEP_WARN(!rcu_read_lock_held(),
+			 "find_task_by_pid_ns() needs rcu_read_lock() protection");
+	return pid_task(find_pid_ns(vnr, task_active_pid_ns(current)), PIDTYPE_PID);
 }
 
 struct pid *get_task_pid(struct task_struct *task, enum pid_type type)
@@ -499,9 +515,9 @@ struct pid *find_get_pid(pid_t nr)
 }
 EXPORT_SYMBOL_GPL(find_get_pid);
 
-pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
+pid_t pid_nr_ns(const struct pid *pid, const struct pid_namespace *ns)
 {
-	struct upid *upid;
+	const struct upid *upid;
 	pid_t nr = 0;
 
 	if (pid && ns->level <= pid->level) {
@@ -513,7 +529,7 @@ pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 }
 EXPORT_SYMBOL_GPL(pid_nr_ns);
 
-pid_t pid_vnr(struct pid *pid)
+pid_t pid_vnr(const struct pid *pid)
 {
 	return pid_nr_ns(pid, task_active_pid_ns(current));
 }
@@ -523,17 +539,28 @@ pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 			struct pid_namespace *ns)
 {
 	pid_t nr = 0;
+	const struct pid *pid;
+	struct task_struct *group_leader = NULL;
 
 	rcu_read_lock();
+
 	if (!ns)
 		ns = task_active_pid_ns(current);
-	if (likely(pid_alive(task))) {
+
+	pid = rcu_dereference(task->pids[PIDTYPE_PID].pid);
+	if (likely(pid)) {
 		if (type != PIDTYPE_PID) {
 			if (type == __PIDTYPE_TGID)
 				type = PIDTYPE_PID;
-			task = task->group_leader;
+
+			group_leader = READ_ONCE(task->group_leader);
+			if (group_leader != task || type != PIDTYPE_PID) {
+				task = group_leader;
+				pid = rcu_dereference(task->pids[type].pid);
+			}
 		}
-		nr = pid_nr_ns(rcu_dereference(task->pids[type].pid), ns);
+		if (likely(pid))
+			nr = pid_nr_ns(pid, ns);
 	}
 	rcu_read_unlock();
 

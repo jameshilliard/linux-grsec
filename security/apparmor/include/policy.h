@@ -134,7 +134,7 @@ struct aa_namespace {
 	struct aa_ns_acct acct;
 	struct aa_profile *unconfined;
 	struct list_head sub_ns;
-	atomic_t uniq_null;
+	atomic_unchecked_t uniq_null;
 	long uniq_id;
 
 	struct dentry *dents[AAFS_NS_SIZEOF];
@@ -403,6 +403,8 @@ static inline int AUDIT_MODE(struct aa_profile *profile)
 	return profile->audit;
 }
 
+bool policy_view_capable(void);
+bool policy_admin_capable(void);
 bool aa_may_manage_policy(int op);
 
 #endif /* __AA_POLICY_H */

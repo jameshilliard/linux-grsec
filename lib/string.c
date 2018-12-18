@@ -126,7 +126,7 @@ EXPORT_SYMBOL(strncpy);
 
 #ifndef __HAVE_ARCH_STRLCPY
 /**
- * strlcpy - Copy a C-string into a sized buffer
+ * strlcpy_check - Copy a C-string into a sized buffer
  * @dest: Where to copy the string to
  * @src: Where to copy the string from
  * @size: size of destination buffer
@@ -136,7 +136,7 @@ EXPORT_SYMBOL(strncpy);
  * of course, the buffer size is zero). It does not pad
  * out the result like strncpy() does.
  */
-size_t strlcpy(char *dest, const char *src, size_t size)
+size_t strlcpy_check(char *dest, const char *src, size_t size)
 {
 	size_t ret = strlen(src);
 
@@ -147,7 +147,15 @@ size_t strlcpy(char *dest, const char *src, size_t size)
 	}
 	return ret;
 }
-EXPORT_SYMBOL(strlcpy);
+EXPORT_SYMBOL(strlcpy_check);
+
+void strlcpy_nocheck(char *dest, const char *src, size_t count)
+{
+	strncpy(dest, src, count);
+	if (likely(count))
+		dest[count - 1] = '\0';
+}
+EXPORT_SYMBOL(strlcpy_nocheck);
 #endif
 
 #ifndef __HAVE_ARCH_STRSCPY

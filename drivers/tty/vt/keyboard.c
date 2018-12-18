@@ -121,6 +121,7 @@ static const int NR_TYPES = ARRAY_SIZE(max_vals);
 static struct input_handler kbd_handler;
 static DEFINE_SPINLOCK(kbd_event_lock);
 static DEFINE_SPINLOCK(led_lock);
+static DEFINE_RWLOCK(kbd_func_lock);
 static unsigned long key_down[BITS_TO_LONGS(KEY_CNT)];	/* keyboard key bitmap */
 static unsigned char shift_down[NR_SHIFT];		/* shift state counters.. */
 static bool dead_key_next;
@@ -630,6 +631,16 @@ static void k_spec(struct vc_data *vc, unsigned char value, char up_flag)
 	     kbd->kbdmode == VC_OFF) &&
 	     value != KVAL(K_SAK))
 		return;		/* SAK is allowed even in raw mode */
+
+#if defined(CONFIG_GRKERNSEC_PROC) || defined(CONFIG_GRKERNSEC_PROC_MEMMAP)
+	{
+		void *func = fn_handler[value];
+		if (func == fn_show_state || func == fn_show_ptregs ||
+		    func == fn_show_mem)
+			return;
+	}
+#endif
+
 	fn_handler[value](vc);
 }
 
@@ -707,8 +718,17 @@ static void k_fn(struct vc_data *vc, unsigned char value, char up_flag)
 		return;
 
 	if ((unsigned)value < ARRAY_SIZE(func_table)) {
-		if (func_table[value])
-			puts_queue(vc, func_table[value]);
+		unsigned char _val[512];
+		unsigned char *val = NULL;
+		unsigned long flags;
+		read_lock_irqsave(&kbd_func_lock, flags);
+		if (func_table[value]) {
+			val = _val;
+			strcpy(val, func_table[value]);
+		}
+		read_unlock_irqrestore(&kbd_func_lock, flags);
+		if (val)
+			puts_queue(vc, val);
 	} else
 		pr_err("k_fn called with value=%d\n", value);
 }
@@ -1868,9 +1888,6 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 	if (copy_from_user(&tmp, user_kbe, sizeof(struct kbentry)))
 		return -EFAULT;
 
-	if (!capable(CAP_SYS_TTY_CONFIG))
-		perm = 0;
-
 	switch (cmd) {
 	case KDGKBENT:
 		/* Ensure another thread doesn't free it under us */
@@ -1885,6 +1902,9 @@ int vt_do_kdsk_ioctl(int cmd, struct kbentry __user *user_kbe, int perm,
 		spin_unlock_irqrestore(&kbd_event_lock, flags);
 		return put_user(val, &user_kbe->kb_value);
 	case KDSKBENT:
+		if (!capable(CAP_SYS_TTY_CONFIG))
+			perm = 0;
+
 		if (!perm)
 			return -EPERM;
 		if (!i && v == K_NOSUCHMAP) {
@@ -1974,9 +1994,8 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 	char *first_free, *fj, *fnw;
 	int i, j, k;
 	int ret;
-
-	if (!capable(CAP_SYS_TTY_CONFIG))
-		perm = 0;
+	unsigned long flags;
+	char *saved_funcbufptr = NULL;
 
 	kbs = kmalloc(sizeof(*kbs), GFP_KERNEL);
 	if (!kbs) {
@@ -1997,25 +2016,40 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		sz = sizeof(kbs->kb_string) - 1; /* sz should have been
 						  a struct member */
 		up = user_kdgkb->kb_string;
+		read_lock_irqsave(&kbd_func_lock, flags);
 		p = func_table[i];
-		if(p)
-			for ( ; *p && sz; p++, sz--)
+		ret = 0;
+		if (p) {
+			unsigned char _val[512];
+			strcpy(_val, p);
+			read_unlock_irqrestore(&kbd_func_lock, flags);
+			p = _val;
+			for ( ; *p && sz; p++, sz--) {
 				if (put_user(*p, up++)) {
 					ret = -EFAULT;
 					goto reterr;
 				}
+			}
+			if (*p)
+				ret = -EOVERFLOW;
+		} else
+			read_unlock_irqrestore(&kbd_func_lock, flags);
+
 		if (put_user('\0', up)) {
 			ret = -EFAULT;
 			goto reterr;
 		}
-		kfree(kbs);
-		return ((p && *p) ? -EOVERFLOW : 0);
+		goto reterr;
 	case KDSKBSENT:
+		if (!capable(CAP_SYS_TTY_CONFIG))
+			perm = 0;
+
 		if (!perm) {
 			ret = -EPERM;
 			goto reterr;
 		}
 
+		write_lock_irqsave(&kbd_func_lock, flags);
 		q = func_table[i];
 		first_free = funcbufptr + (funcbufsize - funcbufleft);
 		for (j = i+1; j < MAX_NR_FUNC && !func_table[j]; j++)
@@ -2026,7 +2060,9 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 			fj = first_free;
 
 		delta = (q ? -strlen(q) : 1) + strlen(kbs->kb_string);
-		if (delta <= funcbufleft) { 	/* it fits in current buf */
+		if (!delta) {
+			goto set_entry;
+		} else if (delta <= funcbufleft) { /* it fits in current buf */
 		    if (j < MAX_NR_FUNC) {
 			memmove(fj + delta, fj, first_free - fj);
 			for (k = j; k < MAX_NR_FUNC; k++)
@@ -2040,8 +2076,9 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 		    sz = 256;
 		    while (sz < funcbufsize - funcbufleft + delta)
 		      sz <<= 1;
-		    fnw = kmalloc(sz, GFP_KERNEL);
+		    fnw = kmalloc(sz, GFP_ATOMIC);
 		    if(!fnw) {
+		      write_unlock_irqrestore(&kbd_func_lock, flags);
 		      ret = -ENOMEM;
 		      goto reterr;
 		    }
@@ -2060,13 +2097,18 @@ int vt_do_kdgkb_ioctl(int cmd, struct kbsentry __user *user_kdgkb, int perm)
 			  if (func_table[k])
 			    func_table[k] = fnw + (func_table[k] - funcbufptr) + delta;
 		    }
-		    if (funcbufptr != func_buf)
-		      kfree(funcbufptr);
+		    saved_funcbufptr = funcbufptr;
 		    funcbufptr = fnw;
 		    funcbufleft = funcbufleft - delta + sz - funcbufsize;
 		    funcbufsize = sz;
 		}
+set_entry:
 		strcpy(func_table[i], kbs->kb_string);
+		write_unlock_irqrestore(&kbd_func_lock, flags);
+
+		if (saved_funcbufptr != func_buf)
+			kfree(saved_funcbufptr);
+
 		break;
 	}
 	ret = 0;

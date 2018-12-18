@@ -121,7 +121,7 @@ xfs_find_handle(
 	}
 
 	error = -EFAULT;
-	if (copy_to_user(hreq->ohandle, &handle, hsize) ||
+	if (hsize > sizeof handle || copy_to_user(hreq->ohandle, &handle, hsize) ||
 	    copy_to_user(hreq->ohandlen, &hsize, sizeof(__s32)))
 		goto out_put;
 
@@ -1488,6 +1488,12 @@ xfs_ioc_swapext(
 
 	if (IS_SWAPFILE(file_inode(f.file)) ||
 	    IS_SWAPFILE(file_inode(tmp.file))) {
+		error = -EINVAL;
+		goto out_put_tmp_file;
+	}
+
+	if (f.file->f_op != &xfs_file_operations ||
+	    tmp.file->f_op != &xfs_file_operations) {
 		error = -EINVAL;
 		goto out_put_tmp_file;
 	}

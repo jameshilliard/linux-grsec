@@ -3,6 +3,7 @@
 
 #include <asm/fpu/api.h>
 #include <asm/pgtable.h>
+#include <asm/tlbflush.h>
 #include <asm/nospec-branch.h>
 
 /*
@@ -65,6 +66,17 @@ extern unsigned long asmlinkage efi_call_phys(void *, ...);
 
 #define EFI_LOADER_SIGNATURE	"EL64"
 
+/*
+ * Scratch space used for switching the pagetable in the EFI stub
+ */
+struct efi_scratch {
+	u64	r15;
+	u64	prev_cr3;
+	pgd_t	*efi_pgt;
+	bool	use_pgd;
+	u64	phys_stack;
+} __packed;
+
 extern u64 asmlinkage efi_call(void *fp, ...);
 
 #define efi_call_phys(f, args...)		efi_call((f), args)
@@ -77,7 +89,20 @@ extern u64 asmlinkage efi_call(void *fp, ...);
 	preempt_disable();						\
 	__kernel_fpu_begin();						\
 	firmware_restrict_branch_speculation_start();			\
+									\
+	if (efi_scratch.use_pgd) {					\
+		efi_scratch.prev_cr3 = read_cr3();			\
+		write_cr3((unsigned long)efi_scratch.efi_pgt);		\
+		__flush_tlb_all();					\
+	}								\
+									\
 	__s = efi_call((void *)efi.systab->runtime->f, __VA_ARGS__);	\
+									\
+	if (efi_scratch.use_pgd) {					\
+		write_cr3(efi_scratch.prev_cr3);			\
+		__flush_tlb_all();					\
+	}								\
+									\
 	firmware_restrict_branch_speculation_end();			\
 	__kernel_fpu_end();						\
 	preempt_enable();						\
@@ -118,6 +143,7 @@ extern void __init efi_memory_uc(u64 addr, unsigned long size);
 extern void __init efi_map_region(efi_memory_desc_t *md);
 extern void __init efi_map_region_fixed(efi_memory_desc_t *md);
 extern void efi_sync_low_kernel_mappings(void);
+extern int __init efi_alloc_page_tables(void);
 extern int __init efi_setup_page_tables(unsigned long pa_memmap, unsigned num_pages);
 extern void __init efi_cleanup_page_tables(unsigned long pa_memmap, unsigned num_pages);
 extern void __init old_map_region(efi_memory_desc_t *md);
@@ -147,6 +173,11 @@ static inline bool efi_is_native(void)
 
 static inline bool efi_runtime_supported(void)
 {
+
+#if defined(CONFIG_X86_32) && defined(CONFIG_PAX_KERNEXEC)
+	return false;
+#endif
+
 	if (efi_is_native())
 		return true;
 

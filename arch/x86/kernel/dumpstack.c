@@ -2,6 +2,9 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  *  Copyright (C) 2000, 2001, 2002 Andi Kleen, SuSE Labs
  */
+#ifdef CONFIG_GRKERNSEC_HIDESYM
+#define __INCLUDED_BY_HIDESYM 1
+#endif
 #include <linux/kallsyms.h>
 #include <linux/kprobes.h>
 #include <linux/uaccess.h>
@@ -35,23 +38,21 @@ static void printk_stack_address(unsigned long address, int reliable,
 
 void printk_address(unsigned long address)
 {
-	pr_cont(" [<%p>] %pS\n", (void *)address, (void *)address);
+	pr_cont(" [<%p>] %pA\n", (void *)address, (void *)address);
 }
 
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
 static void
 print_ftrace_graph_addr(unsigned long addr, void *data,
 			const struct stacktrace_ops *ops,
-			struct thread_info *tinfo, int *graph)
+			struct task_struct *task, int *graph)
 {
-	struct task_struct *task;
 	unsigned long ret_addr;
 	int index;
 
 	if (addr != (unsigned long)return_to_handler)
 		return;
 
-	task = tinfo->task;
 	index = task->curr_ret_stack;
 
 	if (!task->ret_stack || index < *graph)
@@ -68,7 +69,7 @@ print_ftrace_graph_addr(unsigned long addr, void *data,
 static inline void
 print_ftrace_graph_addr(unsigned long addr, void *data,
 			const struct stacktrace_ops *ops,
-			struct thread_info *tinfo, int *graph)
+			struct task_struct *task, int *graph)
 { }
 #endif
 
@@ -79,10 +80,8 @@ print_ftrace_graph_addr(unsigned long addr, void *data,
  * severe exception (double fault, nmi, stack fault, debug, mce) hardware stack
  */
 
-static inline int valid_stack_ptr(struct thread_info *tinfo,
-			void *p, unsigned int size, void *end)
+static inline int valid_stack_ptr(void *t, void *p, unsigned int size, void *end)
 {
-	void *t = tinfo;
 	if (end) {
 		if (p < end && p >= (end-THREAD_SIZE))
 			return 1;
@@ -93,14 +92,14 @@ static inline int valid_stack_ptr(struct thread_info *tinfo,
 }
 
 unsigned long
-print_context_stack(struct thread_info *tinfo,
+print_context_stack(struct task_struct *task, void *stack_start,
 		unsigned long *stack, unsigned long bp,
 		const struct stacktrace_ops *ops, void *data,
 		unsigned long *end, int *graph)
 {
 	struct stack_frame *frame = (struct stack_frame *)bp;
 
-	while (valid_stack_ptr(tinfo, stack, sizeof(*stack), end)) {
+	while (valid_stack_ptr(stack_start, stack, sizeof(*stack), end)) {
 		unsigned long addr;
 
 		addr = *stack;
@@ -112,7 +111,7 @@ print_context_stack(struct thread_info *tinfo,
 			} else {
 				ops->address(data, addr, 0);
 			}
-			print_ftrace_graph_addr(addr, data, ops, tinfo, graph);
+			print_ftrace_graph_addr(addr, data, ops, task, graph);
 		}
 		stack++;
 	}
@@ -121,7 +120,7 @@ print_context_stack(struct thread_info *tinfo,
 EXPORT_SYMBOL_GPL(print_context_stack);
 
 unsigned long
-print_context_stack_bp(struct thread_info *tinfo,
+print_context_stack_bp(struct task_struct *task, void *stack_start,
 		       unsigned long *stack, unsigned long bp,
 		       const struct stacktrace_ops *ops, void *data,
 		       unsigned long *end, int *graph)
@@ -129,7 +128,7 @@ print_context_stack_bp(struct thread_info *tinfo,
 	struct stack_frame *frame = (struct stack_frame *)bp;
 	unsigned long *ret_addr = &frame->return_address;
 
-	while (valid_stack_ptr(tinfo, ret_addr, sizeof(*ret_addr), end)) {
+	while (valid_stack_ptr(stack_start, ret_addr, sizeof(*ret_addr), end)) {
 		unsigned long addr = *ret_addr;
 
 		if (!__kernel_text_address(addr))
@@ -138,7 +137,7 @@ print_context_stack_bp(struct thread_info *tinfo,
 		ops->address(data, addr, 1);
 		frame = frame->next_frame;
 		ret_addr = &frame->return_address;
-		print_ftrace_graph_addr(addr, data, ops, tinfo, graph);
+		print_ftrace_graph_addr(addr, data, ops, task, graph);
 	}
 
 	return (unsigned long)frame;
@@ -226,6 +225,8 @@ unsigned long oops_begin(void)
 EXPORT_SYMBOL_GPL(oops_begin);
 NOKPROBE_SYMBOL(oops_begin);
 
+extern void gr_handle_kernel_exploit(void);
+
 void oops_end(unsigned long flags, struct pt_regs *regs, int signr)
 {
 	if (regs && kexec_should_crash(current))
@@ -247,7 +248,10 @@ void oops_end(unsigned long flags, struct pt_regs *regs, int signr)
 		panic("Fatal exception in interrupt");
 	if (panic_on_oops)
 		panic("Fatal exception");
-	do_exit(signr);
+
+	gr_handle_kernel_exploit();
+
+	do_group_exit(signr);
 }
 NOKPROBE_SYMBOL(oops_end);
 

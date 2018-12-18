@@ -2240,8 +2240,10 @@ static int key_notify_policy(struct xfrm_policy *xp, int dir, const struct km_ev
 		return PTR_ERR(out_skb);
 
 	err = pfkey_xfrm_policy2msg(out_skb, xp, dir);
-	if (err < 0)
+	if (err < 0) {
+		kfree_skb(out_skb);
 		return err;
+	}
 
 	out_hdr = (struct sadb_msg *) out_skb->data;
 	out_hdr->sadb_msg_version = PF_KEY_V2;
@@ -3129,10 +3131,10 @@ static int pfkey_send_policy_notify(struct xfrm_policy *xp, int dir, const struc
 static u32 get_acqseq(void)
 {
 	u32 res;
-	static atomic_t acqseq;
+	static atomic_unchecked_t acqseq;
 
 	do {
-		res = atomic_inc_return(&acqseq);
+		res = atomic_inc_return_unchecked(&acqseq);
 	} while (!res);
 	return res;
 }

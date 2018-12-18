@@ -163,7 +163,7 @@ struct drm_encoder_helper_funcs {
 	int (*atomic_check)(struct drm_encoder *encoder,
 			    struct drm_crtc_state *crtc_state,
 			    struct drm_connector_state *conn_state);
-};
+} __no_const;
 
 /**
  * struct drm_connector_helper_funcs - helper operations for connectors
@@ -182,6 +182,7 @@ struct drm_connector_helper_funcs {
 	struct drm_encoder *(*atomic_best_encoder)(struct drm_connector *connector,
 						   struct drm_connector_state *connector_state);
 };
+typedef struct drm_connector_helper_funcs __no_const drm_connector_helper_funcs_no_const;
 
 extern void drm_helper_disable_unused_functions(struct drm_device *dev);
 extern int drm_crtc_helper_set_config(struct drm_mode_set *set);

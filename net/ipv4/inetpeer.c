@@ -444,8 +444,9 @@ relookup:
 	p = create ? kmem_cache_alloc(peer_cachep, GFP_ATOMIC) : NULL;
 	if (p) {
 		p->daddr = *daddr;
+		p->dtime = (__u32)jiffies;
 		atomic_set(&p->refcnt, 1);
-		atomic_set(&p->rid, 0);
+		atomic_set_unchecked(&p->rid, 0);
 		p->metrics[RTAX_LOCK-1] = INETPEER_METRICS_NEW;
 		p->rate_tokens = 0;
 		/* 60*HZ is arbitrary, but chosen enough high so that the first

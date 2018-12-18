@@ -209,7 +209,7 @@ struct mmp_path_ops {
 	void (*set_mode)(struct mmp_path *path, struct mmp_mode *mode);
 	void (*set_onoff)(struct mmp_path *path, int status);
 	/* todo: add query */
-};
+} __no_const;
 
 /* path output types */
 enum {
